@@ -77,4 +77,20 @@ describe('username investigation', () => {
     )
     assert.ok(logs.some((m) => /GitHub: registered/i.test(m)))
   })
+
+  it('does not treat a generic 200 as an About.me/Twitch hit', async () => {
+    const intel: IntelResult[] = []
+    const fetchImpl: typeof fetch = async () => new Response('<html><title>Home</title></html>', { status: 200 })
+    await runUsernameInvestigation(
+      { ...DEFAULT_OPTIONS, target: 'ops', delayMs: 0, workers: 3 },
+      (event: SpiderEvent) => {
+        if (event.type === 'intel') intel.push(event.intel)
+      },
+      new AbortController().signal,
+      { fetch: fetchImpl, assertSafe: async (url) => new URL(url) },
+    )
+    assert.equal(intel.some((i) => i.site === 'About.me' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Twitch' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Linktree' && i.exists === true), false)
+  })
 })

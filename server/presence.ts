@@ -165,7 +165,10 @@ export const USERNAME_SITES: UsernameSite[] = [
       if (status === 200 && /There isn’t a GitHub Pages site here|Not Found/i.test(body) && /signup/i.test(body)) {
         return { exists: false, evidence: 'GitHub not-found page' }
       }
-      if (status === 200) return { exists: true, evidence: 'HTTP 200 profile/page' }
+      if (status === 200 && /itemprop="additionalName"|class="vcard"|og:type" content="profile"/i.test(body)) {
+        return { exists: true, evidence: 'GitHub profile/org vcard markers' }
+      }
+      if (status === 200) return { exists: true, evidence: 'HTTP 200 user/org page' }
       return { exists: null, evidence: `HTTP ${status}` }
     },
   },
@@ -233,7 +236,15 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'aboutme',
     name: 'About.me',
     url: (u) => `https://about.me/${encodeURIComponent(u)}`,
-    interpret: statusOrNotFound,
+    interpret: (status, body) => {
+      if (status === 404) return { exists: false, evidence: 'HTTP 404' }
+      if (/page not found|doesn'?t exist|user not found/i.test(body)) return { exists: false, evidence: 'not-found copy' }
+      if (status === 200 && /property="og:type"\s+content="profile"/i.test(body)) {
+        return { exists: true, evidence: 'About.me og:type profile' }
+      }
+      if (status === 200) return { exists: null, evidence: 'About.me 200 without profile marker' }
+      return { exists: null, evidence: `HTTP ${status}` }
+    },
   },
   {
     id: 'linktree',
@@ -241,9 +252,12 @@ export const USERNAME_SITES: UsernameSite[] = [
     url: (u) => `https://linktr.ee/${encodeURIComponent(u)}`,
     interpret: (status, body, finalUrl) => {
       if (status === 404) return { exists: false, evidence: 'HTTP 404' }
-      if (/page not found|doesn't exist/i.test(body)) return { exists: false, evidence: 'not-found copy' }
+      if (/page not found|doesn't exist|couldn'?t find/i.test(body)) return { exists: false, evidence: 'not-found copy' }
       if (status === 200 && /linktr\.ee\/login/i.test(finalUrl)) return { exists: null, evidence: 'redirected to login' }
-      if (status === 200) return { exists: true, evidence: 'HTTP 200' }
+      if (status === 200 && /og:title/i.test(body) && !/linktree is the/i.test(body)) {
+        return { exists: true, evidence: 'Linktree og:title on a named page' }
+      }
+      if (status === 200) return { exists: null, evidence: 'Linktree 200 without a clear profile' }
       return { exists: null, evidence: `HTTP ${status}` }
     },
   },
@@ -254,7 +268,8 @@ export const USERNAME_SITES: UsernameSite[] = [
     interpret: (status, body) => {
       if (status === 404) return { exists: false, evidence: 'HTTP 404' }
       if (/Sorry\. Unless you.?ve got a time machine/i.test(body)) return { exists: false, evidence: 'Twitch missing-channel page' }
-      if (status === 200) return { exists: true, evidence: 'HTTP 200' }
+      if (status === 200 && /og:type" content="profile"/i.test(body)) return { exists: true, evidence: 'Twitch og:type profile' }
+      if (status === 200) return { exists: null, evidence: 'Twitch 200 without profile marker (login wall possible)' }
       return { exists: null, evidence: `HTTP ${status}` }
     },
   },
@@ -276,7 +291,13 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'soundcloud',
     name: 'SoundCloud',
     url: (u) => `https://soundcloud.com/${encodeURIComponent(u)}`,
-    interpret: statusOrNotFound,
+    interpret: (status, body) => {
+      if (status === 404) return { exists: false, evidence: 'HTTP 404' }
+      if (/We can.?t find that user|page not found/i.test(body)) return { exists: false, evidence: 'SoundCloud missing user' }
+      if (status === 200 && /og:type" content="profile"/i.test(body)) return { exists: true, evidence: 'SoundCloud profile og:type' }
+      if (status === 200) return { exists: null, evidence: 'SoundCloud 200 without profile marker' }
+      return { exists: null, evidence: `HTTP ${status}` }
+    },
   },
   {
     id: 'telegram',
