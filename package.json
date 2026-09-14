@@ -2,14 +2,14 @@
   "name": "strand",
   "private": true,
   "version": "1.0.0",
-  "description": "STRAND — OSINT spider for authorized recon (seed discovery, DOM extraction, MIME/header inspection).",
+  "description": "STRAND \u2014 OSINT spider for authorized recon (seed discovery, DOM extraction, MIME/header inspection).",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "PORT=47632 tsx watch --exclude \"./src/**\" --exclude \"./dist/**\" server/index.ts",
     "dev:client": "vite --host 127.0.0.1 --port 47631 --strictPort",
     "build": "vite build",
-    "start": "NODE_ENV=production PORT=47631 tsx server/index.ts",
+    "start": "NODE_ENV=production tsx server/index.ts",
     "test": "tsx --test test/*.test.ts",
     "lint": "oxlint"
   },
