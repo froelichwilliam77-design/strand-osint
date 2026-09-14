@@ -4,10 +4,12 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import { isEmailSeed, runEmailInvestigation } from './email.ts'
 import { NORTHLINE_ORIGIN, serveNorthline } from './northline.ts'
+import { parseOptions } from './options.ts'
 import { runSpider } from './spider.ts'
-import { SsrfError, inspectUrlSafety } from './ssrf.ts'
-import { DEFAULT_OPTIONS, type SpiderEvent, type SpiderOptions } from './types.ts'
+import { SsrfError } from './ssrf.ts'
+import type { SpiderEvent } from './types.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const isProd = process.env.NODE_ENV === 'production'
@@ -29,34 +31,6 @@ function publish(job: Job, event: SpiderEvent) {
   for (const listener of job.listeners) listener(event)
 }
 
-function parseOptions(body: unknown): SpiderOptions {
-  const raw = (body ?? {}) as Partial<SpiderOptions>
-  const target = String(raw.target ?? '').trim()
-  if (!target) throw new Error('Target URL is required')
-  const parsed = new URL(target)
-  const safety = inspectUrlSafety(parsed.href)
-  if (!safety.ok) throw new SsrfError(safety.reason)
-  return {
-    target: parsed.href,
-    mode: raw.mode === 'active' ? 'active' : 'semi-passive',
-    scope: raw.scope === 'path-prefix' ? 'path-prefix' : 'same-host',
-    depth: clamp(Number(raw.depth ?? DEFAULT_OPTIONS.depth), 1, 8),
-    maxPages: clamp(Number(raw.maxPages ?? DEFAULT_OPTIONS.maxPages), 1, 250),
-    workers: clamp(Number(raw.workers ?? DEFAULT_OPTIONS.workers), 1, 8),
-    delayMs: clamp(Number(raw.delayMs ?? DEFAULT_OPTIONS.delayMs), 0, 5000),
-    userAgent: String(raw.userAgent || DEFAULT_OPTIONS.userAgent).slice(0, 180),
-    respectRobots: raw.respectRobots !== false,
-    followSitemaps: raw.followSitemaps !== false,
-    wellKnownSeeds: raw.wellKnownSeeds !== false,
-    parseJsUrls: raw.parseJsUrls !== false,
-  }
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (!Number.isFinite(n)) return min
-  return Math.min(max, Math.max(min, Math.round(n)))
-}
-
 const app = express()
 app.disable('x-powered-by')
 app.use(express.json({ limit: '100kb' }))
@@ -76,11 +50,19 @@ app.post('/api/spider', (req, res) => {
       status: 'running',
     }
     jobs.set(job.id, job)
+    const emailJob = isEmailSeed(options.target)
     publish(job, {
       type: 'log',
-      log: { ts: new Date().toISOString(), level: 'info', message: `Spider started for ${options.target}` },
+      log: {
+        ts: new Date().toISOString(),
+        level: 'info',
+        message: emailJob
+          ? `Email investigation started for ${options.target}`
+          : `Spider started for ${options.target}`,
+      },
     })
-    void runSpider(options, (event) => publish(job, event), job.abort.signal)
+    const runner = emailJob ? runEmailInvestigation : runSpider
+    void runner(options, (event) => publish(job, event), job.abort.signal)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
         publish(job, { type: 'error', message })

@@ -11,6 +11,7 @@ import {
   resolveUrl,
   type Extraction,
 } from './extract.ts'
+import { isEmailSeed } from './email.ts'
 import { WELL_KNOWN_PATHS, type ProbeResult, type SecurityHeaders, type SpiderEvent, type SpiderOptions } from './types.ts'
 
 const BINARY_EXT =
@@ -31,6 +32,9 @@ export async function runSpider(
   emit: (event: SpiderEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
+  if (isEmailSeed(options.target)) {
+    throw new Error('Email seeds must use email investigation, not URL crawl')
+  }
   const target = new URL(options.target)
   const safety = inspectUrlSafety(target.href)
   if (!safety.ok) throw new SsrfError(safety.reason)
@@ -239,7 +243,7 @@ export async function runSpider(
     return
   }
   log('info', `Done — ${probed} probed, ${forms} forms, ${scripts.size} scripts, ${intel} intel, ${skipped} skipped`)
-  emit({ type: 'status', status: 'done', stats: stats(), message: 'Complete' })
+  emit({ type: 'status', status: 'done', stats: stats(), message: `Complete — ${probed} URLs` })
 }
 
 interface Fetched {

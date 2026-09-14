@@ -59,12 +59,14 @@ export interface FormResult {
 
 export interface SeedResult {
   url: string
-  kind: 'robots' | 'sitemap' | 'manifest' | 'well-known' | 'html' | 'redirect'
+  kind: 'robots' | 'sitemap' | 'manifest' | 'well-known' | 'html' | 'redirect' | 'email'
   detail: string
 }
 
+export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx'
+
 export interface IntelResult {
-  type: 'email' | 'phone'
+  type: IntelType
   value: string
   source: string
 }

@@ -64,10 +64,29 @@ export interface SeedResult {
   detail: string
 }
 
+export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx'
+
 export interface IntelResult {
-  type: 'email' | 'phone'
+  type: IntelType
   value: string
   source: string
+}
+
+const EMAIL_SEED_RE = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i
+
+export function parseEmailSeed(raw: string): string | null {
+  let s = raw.trim()
+  if (!s) return null
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return null
+  if (/^mailto:/i.test(s)) s = s.slice(7).trim()
+  s = s.replace(/^<|>$/g, '').trim()
+  if (/\s/.test(s) || s.includes('/')) return null
+  if (!EMAIL_SEED_RE.test(s)) return null
+  return s
+}
+
+export function isEmailSeed(raw: string): boolean {
+  return parseEmailSeed(raw) !== null
 }
 
 export interface LogEvent {

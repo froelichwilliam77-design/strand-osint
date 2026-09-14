@@ -1,6 +1,6 @@
 import { FlaskConical, Play, Square } from 'lucide-react'
 import { Button, Field, Input, NativeSelect, SliderRow, Toggle } from '@/components/ui'
-import { NORTHLINE_TARGET, type SpiderOptions } from '@/lib/utils'
+import { NORTHLINE_TARGET, isEmailSeed, type SpiderOptions } from '@/lib/utils'
 
 export function ControlPanel({
   options,
@@ -20,10 +20,10 @@ export function ControlPanel({
   return (
     <aside className="flex min-h-0 flex-col rounded-2xl border border-line bg-panel p-4 lg:h-full">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scrollbar-thin pr-1">
-        <Field label="Target URL">
+        <Field label="Target URL or email">
           <Input
             value={options.target}
-            placeholder="https://example.com"
+            placeholder="https://example.com or name@domain.com"
             onChange={(e) => set('target', e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !running) onRun()
@@ -67,7 +67,8 @@ export function ControlPanel({
           <Toggle label="Parse JavaScript URLs" checked={options.parseJsUrls} onChange={(v) => set('parseJsUrls', v)} />
         </div>
         <p className="text-[11px] leading-5 text-muted">
-          Only crawl systems you are authorized to test. Server-side probes block private, loopback, link-local, and metadata
+          Only crawl systems you are authorized to test. Email seeds use public records (Gravatar, DNS, profile URL
+          patterns) and never contact the mailbox. Server-side probes block private, loopback, link-local, and metadata
           addresses. Semi-passive mode HEADs binaries and never submits forms.
         </p>
       </div>
@@ -75,12 +76,12 @@ export function ControlPanel({
         {running ? (
           <Button type="button" variant="danger" className="w-full py-2.5" onClick={onStop}>
             <Square className="h-3.5 w-3.5 fill-current" />
-            Stop spider
+            {isEmailSeed(options.target) ? 'Stop' : 'Stop spider'}
           </Button>
         ) : (
           <Button type="button" className="w-full py-2.5 font-semibold" onClick={onRun}>
             <Play className="h-4 w-4 fill-current" />
-            Run spider
+            {isEmailSeed(options.target) ? 'Run email intel' : 'Run spider'}
           </Button>
         )}
       </div>

@@ -17,6 +17,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 47631,
     strictPort: true,
+    allowedHosts: true,
     proxy: {
       '/api': 'http://127.0.0.1:47632',
       '/northline': 'http://127.0.0.1:47632',
@@ -25,5 +26,6 @@ export default defineConfig({
   preview: {
     host: '127.0.0.1',
     port: 47631,
+    allowedHosts: true,
   },
 })
