@@ -19,7 +19,7 @@ export interface SpiderOptions {
 export interface ProbeResult {
   url: string
   finalUrl: string
-  method: 'GET' | 'HEAD'
+  method: 'GET' | 'HEAD' | 'POST'
   status: number
   contentType: string
   mime: string
@@ -57,18 +57,27 @@ export interface FormResult {
   fields: FormField[]
 }
 
+export type SeedKind = 'url' | 'email' | 'username' | 'phone'
+
 export interface SeedResult {
   url: string
-  kind: 'robots' | 'sitemap' | 'manifest' | 'well-known' | 'html' | 'redirect' | 'email'
+  kind: 'robots' | 'sitemap' | 'manifest' | 'well-known' | 'html' | 'redirect' | 'email' | 'username' | 'phone'
   detail: string
 }
 
-export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx'
+export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx' | 'account'
+export type IntelConfidence = 'high' | 'medium' | 'low' | 'unverified'
 
 export interface IntelResult {
   type: IntelType
   value: string
   source: string
+  confidence?: IntelConfidence
+  site?: string
+  url?: string
+  evidence?: string
+  probed?: boolean
+  exists?: boolean | null
 }
 
 export interface LogEvent {

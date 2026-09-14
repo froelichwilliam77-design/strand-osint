@@ -1,31 +1,25 @@
-import { parseEmailSeed } from './email.ts'
+import { classifySeed } from './seed.ts'
 import { SsrfError, inspectUrlSafety } from './ssrf.ts'
 import { DEFAULT_OPTIONS, type SpiderOptions } from './types.ts'
 
 export function parseOptions(body: unknown): SpiderOptions {
   const raw = (body ?? {}) as Partial<SpiderOptions>
   const target = String(raw.target ?? '').trim()
-  if (!target) throw new Error('Target URL or email is required')
+  if (!target) throw new Error('Target is required — paste a URL, email, @username, or phone number.')
 
-  const email = parseEmailSeed(target)
-  if (email) {
-    return {
-      ...baseOptions(raw),
-      target: email,
-    }
+  const seed = classifySeed(target)
+  if (seed.kind === 'unknown' || !seed.value) {
+    throw new TypeError('Could not parse target. Paste a URL (https://…), email, @username, or phone number.')
   }
 
-  let parsed: URL
-  try {
-    parsed = new URL(target)
-  } catch {
-    throw new TypeError('Invalid URL')
+  if (seed.kind === 'url') {
+    const safety = inspectUrlSafety(seed.value)
+    if (!safety.ok) throw new SsrfError(safety.reason)
   }
-  const safety = inspectUrlSafety(parsed.href)
-  if (!safety.ok) throw new SsrfError(safety.reason)
+
   return {
     ...baseOptions(raw),
-    target: parsed.href,
+    target: seed.value,
   }
 }
 

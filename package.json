@@ -2,7 +2,7 @@
   "name": "strand",
   "private": true,
   "version": "1.0.0",
-  "description": "STRAND \u2014 OSINT spider for authorized recon (seed discovery, DOM extraction, MIME/header inspection).",
+  "description": "STRAND — OSINT spider for authorized recon (seed discovery, DOM extraction, MIME/header inspection).",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
@@ -19,6 +19,7 @@
     "clsx": "^2.1.1",
     "express": "^5.1.0",
     "fast-xml-parser": "^5.2.5",
+    "libphonenumber-js": "^1.13.13",
     "lucide-react": "^0.544.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

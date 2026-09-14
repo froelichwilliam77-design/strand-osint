@@ -21,7 +21,9 @@ export function exportCsv(probes: ProbeResult[], forms: FormResult[], intel: Int
       csv(['probe', p.url, p.status || p.skipped || '', p.method, p.mime, p.source, p.skipped ?? '']),
     ),
     ...forms.map((f) => csv(['form', f.action, f.method, '', '', f.page, f.fields.map((x) => x.name).join(';')])),
-    ...intel.map((i) => csv(['intel', i.value, i.type, '', '', i.source, ''])),
+    ...intel.map((i) =>
+      csv(['intel', i.url || i.value, i.type, i.confidence ?? '', i.site ?? '', i.source, i.evidence ?? i.exists ?? '']),
+    ),
     ...seeds.map((s) => csv(['seed', s.url, s.kind, '', '', s.detail, ''])),
   ]
   downloadBlob('strand-results.csv', 'text/csv', lines.join('\n'))

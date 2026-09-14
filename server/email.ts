@@ -1,12 +1,10 @@
 import { createHash } from 'node:crypto'
 import { promises as dns } from 'node:dns'
-import { assertSafeUrl, inspectUrlSafety, SsrfError } from './ssrf.ts'
-import type { IntelResult, ProbeResult, SecurityHeaders, SpiderEvent, SpiderOptions } from './types.ts'
-
-const EMAIL_SEED_RE = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i
-const FETCH_TIMEOUT_MS = 10_000
-const MAX_REDIRECTS = 8
-const MAX_BODY = 400_000
+import { errMessage, isAbortError, probeHttp } from './http.ts'
+import { parseEmailSeed as parseMailbox } from './phone.ts'
+import { runEmailModules, runUsernameProbes, type OsintDeps } from './presence.ts'
+import { inspectUrlSafety } from './ssrf.ts'
+import type { IntelResult, SpiderEvent, SpiderOptions } from './types.ts'
 
 export const MAILBOX_PROVIDERS: Record<string, string> = {
   'gmail.com': 'Google consumer mailbox (dots and +tags are ignored)',
@@ -35,27 +33,19 @@ export const MAILBOX_PROVIDERS: Record<string, string> = {
   'hey.com': 'HEY',
 }
 
-/** Public profile URL patterns — candidates only, not proof of an account. */
-export const SOCIAL_NETWORKS: { name: string; url: (username: string) => string }[] = [
-  { name: 'GitHub', url: (u) => `https://github.com/${u}` },
-  { name: 'GitLab', url: (u) => `https://gitlab.com/${u}` },
-  { name: 'X (Twitter)', url: (u) => `https://x.com/${u}` },
-  { name: 'Instagram', url: (u) => `https://www.instagram.com/${u}/` },
-  { name: 'Reddit', url: (u) => `https://www.reddit.com/user/${u}` },
-  { name: 'LinkedIn', url: (u) => `https://www.linkedin.com/in/${u}` },
-  { name: 'TikTok', url: (u) => `https://www.tiktok.com/@${u}` },
-  { name: 'YouTube', url: (u) => `https://www.youtube.com/@${u}` },
-  { name: 'Facebook', url: (u) => `https://www.facebook.com/${u}` },
-  { name: 'Medium', url: (u) => `https://medium.com/@${u}` },
-  { name: 'Pinterest', url: (u) => `https://www.pinterest.com/${u}/` },
-  { name: 'Twitch', url: (u) => `https://www.twitch.tv/${u}` },
-  { name: 'Keybase', url: (u) => `https://keybase.io/${u}` },
-  { name: 'Hacker News', url: (u) => `https://news.ycombinator.com/user?id=${u}` },
-  { name: 'npm', url: (u) => `https://www.npmjs.com/~${u}` },
-  { name: 'Telegram', url: (u) => `https://t.me/${u}` },
-  { name: 'About.me', url: (u) => `https://about.me/${u}` },
-  { name: 'Linktree', url: (u) => `https://linktr.ee/${u}` },
-]
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com',
+  'guerrillamail.com',
+  'guerrillamail.org',
+  '10minutemail.com',
+  'tempmail.com',
+  'temp-mail.org',
+  'yopmail.com',
+  'trashmail.com',
+  'discard.email',
+  'getnada.com',
+  'sharklasers.com',
+])
 
 export interface EmailParts {
   email: string
@@ -63,21 +53,12 @@ export interface EmailParts {
   domain: string
 }
 
-export interface EmailOsintDeps {
-  fetch?: typeof fetch
+export interface EmailOsintDeps extends OsintDeps {
   resolveMx?: (domain: string) => Promise<Array<{ exchange: string; priority: number }>>
-  assertSafe?: (url: string) => Promise<URL>
 }
 
 export function parseEmailSeed(raw: string): string | null {
-  let s = raw.trim()
-  if (!s) return null
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return null
-  if (/^mailto:/i.test(s)) s = s.slice(7).trim()
-  s = s.replace(/^<|>$/g, '').trim()
-  if (/\s/.test(s) || s.includes('/')) return null
-  if (!EMAIL_SEED_RE.test(s)) return null
-  return s
+  return parseMailbox(raw)
 }
 
 export function isEmailSeed(raw: string): boolean {
@@ -118,11 +99,6 @@ export function deriveUsernames(localPart: string): string[] {
   return out
 }
 
-export function socialProfileUrls(username: string): Array<{ network: string; url: string }> {
-  const encoded = encodeURIComponent(username)
-  return SOCIAL_NETWORKS.map((network) => ({ network: network.name, url: network.url(encoded) }))
-}
-
 export async function runEmailInvestigation(
   options: SpiderOptions,
   emit: (event: SpiderEvent) => void,
@@ -130,20 +106,16 @@ export async function runEmailInvestigation(
   deps: EmailOsintDeps = {},
 ): Promise<void> {
   const parts = splitEmail(options.target)
-  const fetchImpl = deps.fetch ?? fetch
   const resolveMx = deps.resolveMx ?? ((domain: string) => dns.resolveMx(domain))
-  const assertSafe = deps.assertSafe ?? assertSafeUrl
-  let probed = 0
-  let intel = 0
-  let skipped = 0
+  const counters = { probed: 0, skipped: 0, intel: 0 }
 
   const stats = () => ({
-    probed,
+    probed: counters.probed,
     forms: 0,
     scripts: 0,
-    intel,
+    intel: counters.intel,
     queued: 0,
-    skipped,
+    skipped: counters.skipped,
   })
 
   const log = (level: 'info' | 'warn' | 'error' | 'skip', message: string) => {
@@ -151,7 +123,7 @@ export async function runEmailInvestigation(
   }
 
   const pushIntel = (item: IntelResult) => {
-    intel += 1
+    counters.intel += 1
     emit({ type: 'intel', intel: item })
   }
 
@@ -165,14 +137,38 @@ export async function runEmailInvestigation(
   })
   emit({ type: 'status', status: 'running', stats: stats(), message: 'Email investigation' })
 
-  pushIntel({ type: 'email', value: parts.email, source: 'seed' })
-  pushIntel({ type: 'username', value: parts.local, source: 'email local-part' })
+  pushIntel({
+    type: 'email',
+    value: parts.email,
+    source: 'seed',
+    confidence: 'high',
+    probed: false,
+    evidence: 'Operator-supplied mailbox',
+  })
+  pushIntel({
+    type: 'username',
+    value: parts.local,
+    source: 'email local-part',
+    confidence: 'medium',
+    evidence: 'Exact local-part; not proof of a matching handle',
+  })
   const provider = MAILBOX_PROVIDERS[parts.domain]
   pushIntel({
     type: 'domain',
     value: parts.domain,
     source: provider ? `email domain · ${provider}` : 'email domain (custom / org mailbox likely)',
+    confidence: 'high',
+    evidence: provider ? 'Known consumer mailbox provider' : 'Not in the built-in consumer-provider list',
   })
+  if (DISPOSABLE_DOMAINS.has(parts.domain)) {
+    pushIntel({
+      type: 'domain',
+      value: parts.domain,
+      source: 'disposable-mailbox indicator',
+      confidence: 'high',
+      evidence: 'Domain is on STRAND’s small public disposable-mail list',
+    })
+  }
 
   if (signal.aborted) {
     emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
@@ -188,6 +184,9 @@ export async function runEmailInvestigation(
         type: 'mx',
         value: rec.exchange.replace(/\.$/, ''),
         source: `DNS MX ${parts.domain} (priority ${rec.priority})`,
+        confidence: 'high',
+        probed: true,
+        evidence: 'Public DNS MX',
       })
     }
     if (mx.length) log('info', `MX for ${parts.domain}: ${mx.map((m) => m.exchange).join(', ')}`)
@@ -196,22 +195,31 @@ export async function runEmailInvestigation(
   }
 
   const hash = gravatarHash(parts.email)
-  pushIntel({
-    type: 'site',
-    value: `https://www.gravatar.com/${hash}`,
-    source: 'Gravatar public hash (MD5 of lowercase email)',
-  })
-
   const avatarUrl = `https://www.gravatar.com/avatar/${hash}?d=404`
   try {
-    const avatar = await probeHttp(avatarUrl, 'GET', options.userAgent, signal, fetchImpl, assertSafe)
-    probed += 1
+    emit({ type: 'status', status: 'running', stats: stats(), message: 'Checking Gravatar…' })
+    const avatar = await probeHttp({
+      url: avatarUrl,
+      method: 'GET',
+      userAgent: options.userAgent,
+      signal,
+      fetchImpl: deps.fetch,
+      assertSafe: deps.assertSafe,
+      source: 'email-osint',
+    })
+    counters.probed += 1
     emit({ type: 'probe', probe: avatar.probe })
     if (avatar.probe.status === 200) {
       pushIntel({
-        type: 'site',
-        value: avatar.probe.finalUrl || avatarUrl,
+        type: 'account',
+        value: 'Gravatar · registered',
+        site: 'Gravatar',
+        url: avatar.probe.finalUrl || avatarUrl,
         source: 'Gravatar avatar exists (public hash check)',
+        confidence: 'high',
+        probed: true,
+        exists: true,
+        evidence: 'Avatar endpoint returned 200 for MD5(email)',
       })
       log('info', `Gravatar avatar found for ${parts.email}`)
     } else if (avatar.probe.status === 404) {
@@ -220,14 +228,26 @@ export async function runEmailInvestigation(
       log('warn', `Gravatar avatar check returned ${avatar.probe.status}`)
     }
   } catch (err) {
-    skipped += 1
+    if (isAbortError(err) || signal.aborted) {
+      emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
+      return
+    }
+    counters.skipped += 1
     log('warn', `Gravatar avatar check skipped: ${errMessage(err)}`)
   }
 
   const profileJsonUrl = `https://www.gravatar.com/${hash}.json`
   try {
-    const profile = await probeHttp(profileJsonUrl, 'GET', options.userAgent, signal, fetchImpl, assertSafe)
-    probed += 1
+    const profile = await probeHttp({
+      url: profileJsonUrl,
+      method: 'GET',
+      userAgent: options.userAgent,
+      signal,
+      fetchImpl: deps.fetch,
+      assertSafe: deps.assertSafe,
+      source: 'email-osint',
+    })
+    counters.probed += 1
     emit({ type: 'probe', probe: profile.probe })
     if (profile.probe.status === 200 && profile.body.length) {
       parseGravatarJson(profile.body.toString('utf8'), pushIntel, log)
@@ -235,29 +255,50 @@ export async function runEmailInvestigation(
       log('info', 'No public Gravatar profile JSON for this hash')
     }
   } catch (err) {
-    skipped += 1
+    if (isAbortError(err) || signal.aborted) {
+      emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
+      return
+    }
+    counters.skipped += 1
     log('warn', `Gravatar profile check skipped: ${errMessage(err)}`)
   }
 
-  const usernames = deriveUsernames(parts.local)
-  for (const username of usernames) {
-    if (username.toLowerCase() === parts.local.toLowerCase()) continue
-    pushIntel({ type: 'username', value: username, source: 'derived from local-part (unverified)' })
+  log('info', 'Holehe-style site checks (register/login/public APIs only; never password-reset or SMTP)')
+  try {
+    await runEmailModules(parts.email, options, emit, signal, deps, counters)
+  } catch (err) {
+    if (isAbortError(err) || signal.aborted) {
+      emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
+      log('warn', 'Email investigation stopped')
+      return
+    }
+    log('warn', `Site checks stopped early: ${errMessage(err)}`)
   }
 
-  const fanoutNames = usernames.slice(0, 2)
-  log(
-    'info',
-    `Emitting unverified profile URL candidates for ${fanoutNames.join(', ')} (not proof of accounts)`,
-  )
-  for (const username of fanoutNames) {
-    for (const profile of socialProfileUrls(username)) {
-      pushIntel({
-        type: 'site',
-        value: profile.url,
-        source: `unverified ${profile.network} candidate from local-part "${username}"`,
-      })
+  const usernames = deriveUsernames(parts.local)
+  const probeHandle = usernames[0] ?? parts.local
+  for (const username of usernames) {
+    if (username.toLowerCase() === parts.local.toLowerCase()) continue
+    pushIntel({
+      type: 'username',
+      value: username,
+      source: 'derived from local-part',
+      confidence: 'unverified',
+      probed: false,
+      evidence: 'Heuristic variant of the mailbox local-part — not a finding unless a probe hits',
+    })
+  }
+
+  log('info', `Probing public profiles for handle "${probeHandle}" (derived from local-part; hits only if the page exists)`)
+  try {
+    await runUsernameProbes(probeHandle, options, emit, signal, deps, counters, `email local-part "${probeHandle}"`)
+  } catch (err) {
+    if (isAbortError(err) || signal.aborted) {
+      emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
+      log('warn', 'Email investigation stopped')
+      return
     }
+    log('warn', `Username probes stopped early: ${errMessage(err)}`)
   }
 
   if (!provider) {
@@ -267,16 +308,32 @@ export async function runEmailInvestigation(
       log('skip', `Domain homepage probe blocked: ${safety.reason}`)
     } else {
       try {
-        const home = await probeHttp(homepage, 'HEAD', options.userAgent, signal, fetchImpl, assertSafe)
-        probed += 1
+        const home = await probeHttp({
+          url: homepage,
+          method: 'HEAD',
+          userAgent: options.userAgent,
+          signal,
+          fetchImpl: deps.fetch,
+          assertSafe: deps.assertSafe,
+          source: 'email-osint',
+        })
+        counters.probed += 1
         emit({ type: 'probe', probe: home.probe })
         pushIntel({
           type: 'site',
           value: home.probe.finalUrl || homepage,
           source: `custom-domain homepage (${home.probe.status})`,
+          confidence: 'medium',
+          probed: true,
+          exists: home.probe.status > 0 && home.probe.status < 500,
+          evidence: `HEAD ${home.probe.status}`,
         })
       } catch (err) {
-        skipped += 1
+        if (isAbortError(err) || signal.aborted) {
+          emit({ type: 'status', status: 'stopped', stats: stats(), message: 'Stopped' })
+          return
+        }
+        counters.skipped += 1
         log('warn', `Domain homepage probe skipped: ${errMessage(err)}`)
       }
     }
@@ -290,9 +347,9 @@ export async function runEmailInvestigation(
 
   log(
     'info',
-    `Done — email OSINT ${probed} HTTP checks, ${intel} intel. Holehe-style site-registration modules are not bundled (follow-up).`,
+    `Done — email OSINT ${counters.probed} HTTP checks, ${counters.intel} intel (verified/probed first; unverified handles labeled)`,
   )
-  emit({ type: 'status', status: 'done', stats: stats(), message: `Complete — ${intel} intel (email OSINT)` })
+  emit({ type: 'status', status: 'done', stats: stats(), message: `Complete — ${counters.intel} intel (email OSINT)` })
 }
 
 function parseGravatarJson(
@@ -314,21 +371,48 @@ function parseGravatarJson(
     if (!entry) return
     log('info', 'Public Gravatar profile JSON found')
     if (entry.displayName) {
-      pushIntel({ type: 'username', value: entry.displayName, source: 'Gravatar public profile display name' })
+      pushIntel({
+        type: 'username',
+        value: entry.displayName,
+        source: 'Gravatar public profile display name',
+        confidence: 'high',
+        probed: true,
+        exists: true,
+      })
     }
     if (entry.preferredUsername) {
-      pushIntel({ type: 'username', value: entry.preferredUsername, source: 'Gravatar preferred username' })
+      pushIntel({
+        type: 'username',
+        value: entry.preferredUsername,
+        source: 'Gravatar preferred username',
+        confidence: 'high',
+        probed: true,
+        exists: true,
+      })
     }
     if (entry.profileUrl) {
-      pushIntel({ type: 'site', value: entry.profileUrl, source: 'Gravatar public profile URL' })
+      pushIntel({
+        type: 'site',
+        value: entry.profileUrl,
+        source: 'Gravatar public profile URL',
+        confidence: 'high',
+        probed: true,
+        exists: true,
+        url: entry.profileUrl,
+      })
     }
     for (const account of entry.accounts ?? []) {
       if (!account.url) continue
       const tag = account.verified ? 'verified' : 'listed'
       pushIntel({
-        type: 'site',
-        value: account.url,
-        source: `Gravatar public profile ${tag} account (${account.shortname || account.domain || 'site'})`,
+        type: 'account',
+        value: `${account.shortname || account.domain || 'site'} · ${tag}`,
+        site: account.shortname || account.domain || 'Gravatar account',
+        url: account.url,
+        source: `Gravatar public profile ${tag} account`,
+        confidence: account.verified ? 'high' : 'medium',
+        probed: true,
+        exists: true,
       })
     }
     for (const extra of entry.urls ?? []) {
@@ -337,116 +421,12 @@ function parseGravatarJson(
         type: 'site',
         value: extra.value,
         source: extra.title ? `Gravatar profile link (${extra.title})` : 'Gravatar profile link',
+        confidence: 'medium',
+        probed: true,
+        url: extra.value,
       })
     }
   } catch {
     log('warn', 'Gravatar profile JSON was not parseable')
   }
-}
-
-async function probeHttp(
-  url: string,
-  method: 'GET' | 'HEAD',
-  userAgent: string,
-  signal: AbortSignal,
-  fetchImpl: typeof fetch,
-  assertSafe: (url: string) => Promise<URL>,
-): Promise<{ probe: ProbeResult; body: Buffer }> {
-  let current = url
-  const redirectChain: string[] = []
-  let lastHeaders = new Headers()
-  for (let i = 0; i < MAX_REDIRECTS; i += 1) {
-    if (signal.aborted) throw new Error('aborted')
-    await assertSafe(current)
-    const controller = AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
-    const response = await fetchImpl(current, {
-      method,
-      redirect: 'manual',
-      signal: controller,
-      headers: {
-        'user-agent': userAgent,
-        accept: 'application/json,image/*,text/plain,*/*;q=0.8',
-      },
-    })
-    lastHeaders = response.headers
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location')
-      if (!location) {
-        return packProbe(url, current, method, response.status, lastHeaders, Buffer.alloc(0), redirectChain)
-      }
-      const next = new URL(location, current).href
-      const hopSafety = inspectUrlSafety(next)
-      if (!hopSafety.ok) throw new SsrfError(`Redirect blocked: ${hopSafety.reason}`)
-      redirectChain.push(next)
-      current = next
-      continue
-    }
-    let body = Buffer.alloc(0)
-    if (method !== 'HEAD') {
-      const buf = Buffer.from(await response.arrayBuffer())
-      body = buf.subarray(0, MAX_BODY)
-    }
-    return packProbe(url, current, method, response.status, lastHeaders, body, redirectChain)
-  }
-  return packProbe(url, current, method, 310, lastHeaders, Buffer.alloc(0), redirectChain)
-}
-
-function packProbe(
-  url: string,
-  finalUrl: string,
-  method: 'GET' | 'HEAD',
-  status: number,
-  headers: Headers,
-  body: Buffer,
-  redirectChain: string[],
-): { probe: ProbeResult; body: Buffer } {
-  const contentType = headers.get('content-type') ?? ''
-  return {
-    body,
-    probe: {
-      url,
-      finalUrl,
-      method,
-      status,
-      contentType,
-      mime: contentType.split(';')[0]?.trim() || '',
-      headers: flattenHeaders(headers),
-      cookies: cookieNames(headers),
-      redirectChain,
-      securityHeaders: securityHeaders(headers),
-      server: headers.get('server') ?? '',
-      size: body.length,
-      depth: 0,
-      source: 'email-osint',
-    },
-  }
-}
-
-function flattenHeaders(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {}
-  headers.forEach((value, key) => {
-    out[key] = out[key] ? `${out[key]}, ${value}` : value
-  })
-  return out
-}
-
-function securityHeaders(headers: Headers): SecurityHeaders {
-  return {
-    hsts: headers.get('strict-transport-security'),
-    csp: headers.get('content-security-policy'),
-    xfo: headers.get('x-frame-options'),
-    xcto: headers.get('x-content-type-options'),
-    xxss: headers.get('x-xss-protection'),
-    referrerPolicy: headers.get('referrer-policy'),
-    permissionsPolicy: headers.get('permissions-policy') ?? headers.get('feature-policy'),
-  }
-}
-
-function cookieNames(headers: Headers): string[] {
-  const raw = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : []
-  return raw.map((c) => c.split(';')[0] ?? c)
-}
-
-function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

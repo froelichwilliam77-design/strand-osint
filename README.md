@@ -1,8 +1,8 @@
 # STRAND
 
-**OSINT SPIDER** — an active / semi-passive recon crawler in the Katana / Hakrawler vein. It actually fetches and parses pages: seed discovery, DOM link extraction, and MIME / header inspection. Paste an email into the target field to run public-records email OSINT instead of a crawl.
+**OSINT SPIDER** — an active / semi-passive recon crawler in the Katana / Hakrawler vein. It actually fetches and parses pages: seed discovery, DOM link extraction, and MIME / header inspection.
 
-Use it only against systems (and mailboxes) you are authorized to test.
+Paste a **URL**, **email**, **@username**, or **phone** into Target. Use it only against systems and identifiers you are authorized to investigate.
 
 ## Run locally
 
@@ -30,21 +30,35 @@ A sample run with default settings should find on the order of dozens of URLs, p
 
 The sample is also browsable at `/northline` on the API server for inspection, but the spider itself uses the virtual host so SSRF rules can keep blocking localhost.
 
-## Email seed
+## Seeds
 
-Paste an address such as `name@domain.com` into **Target URL or email**. STRAND will not treat that string as a crawl URL (`new URL(email)` is never used as a spider target). The email job is public-records only:
+| Target | What STRAND does |
+| --- | --- |
+| `https://…` or `example.com` | URL spider (seeds, DOM, headers). Hostnames without a scheme get `https://`. |
+| `name@domain.com` | Email OSINT (below). Never treated as a crawl URL. |
+| `@handle` or `octocat` | Public profile presence checks. |
+| `+12065550100` | E.164 normalize + numbering-plan metadata only. |
 
-- Split local-part / domain and emit intel nodes
-- DNS MX records and mailbox-provider ecosystem hints (Gmail, Outlook, Proton, …)
-- Gravatar existence check via the public MD5 hash (avatar `d=404` plus profile JSON)
-- Username derived from the local-part, with **unverified** profile URL candidates for common networks (GitHub, X, Reddit, LinkedIn, …)
-- For non-mailbox custom domains, a single SSRF-guarded homepage probe (not a site-wide crawl)
+Jobs never send SMTP, SMS, or phishing. Public-records / authorized-use warning stays on the desk.
 
-Results land in the existing **Intel**, **Endpoints**, and **Log** tabs. The job never contacts the mailbox (no SMTP VRFY, no calendar invites, no phishing).
+### Email
 
-Holehe-style “is this email registered on site X?” checks are **not** bundled: they need a maintained module set and tend to be fragile. Gravatar + MX/ecosystem + username URL fan-out ship now; holehe is a follow-up if you want account-enumeration across web apps.
+Public records only:
 
-http(s) targets and the Northline sample still use the URL spider unchanged.
+- Local-part / domain split, consumer-mailbox hints, small disposable-domain list
+- DNS MX
+- Gravatar existence (public MD5 avatar + profile JSON)
+- **Holehe-style site checks** for a practical set (GitHub public email search, Keybase, Duolingo, Spotify, WordPress.com, Imgur, Pinterest, Tumblr, Chess.com). Register / login / public APIs only — **never password-reset** (that would contact the mailbox)
+- Public **profile probes** for the local-part handle (GitHub, GitLab, Reddit, HN, npm, …). Hits are HTTP-confirmed pages
+- Derived username variants are **unverified** and secondary in the Intel tab — not dumped as fake social findings
+
+### Username
+
+SSRF-guarded GET of public profile URLs. Confirmed pages stream into Intel / Endpoints with confidence. Inconclusive login walls are logged, not treated as hits.
+
+### Phone
+
+[libphonenumber](https://gitlab.com/catamphetamine/libphonenumber-js) metadata: E.164, national/international format, ISO region, numbering-plan type (mobile / fixed / VoIP ranges). **No CNAM, SS7, SMS, or live carrier dips.**
 
 ## Safety
 
@@ -53,7 +67,7 @@ http(s) targets and the Northline sample still use the URL spider unchanged.
 - Semi-passive mode sends `HEAD` for binaries and never submits forms. Active mode GETs binary bodies; forms are still never submitted.
 - Default scope is same host. Path-prefix scope stays under the target path.
 - Default is to honor `robots.txt`. Rate limit with **Delay** and **Workers**.
-- Email mode stays on public hashes, public DNS, and public URL patterns.
+- Presence checks share those SSRF guards and a small worker pool.
 
 ## Tests
 
@@ -61,4 +75,4 @@ http(s) targets and the Northline sample still use the URL spider unchanged.
 npm test
 ```
 
-Covers SSRF URL/IP blocks, HTML/CSS/JS extractors, email seed detection / email OSINT, and a live crawl of the Northline sample (robots on vs off).
+Covers SSRF URL/IP blocks, HTML/CSS/JS extractors, seed classification, holehe-style interpreters, email/username/phone OSINT, and a live crawl of the Northline sample (robots on vs off).

@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlPanel } from '@/components/ControlPanel'
 import { Metrics, Results, type Tab } from '@/components/Workspace'
 import {
   defaultOptions,
-  isEmailSeed,
+  peekSeedKind,
   type FormResult,
   type IntelResult,
   type LogEvent,
@@ -32,10 +32,24 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const jobRef = useRef<string | null>(null)
   const sourceRef = useRef<EventSource | null>(null)
+  const genRef = useRef(0)
+  const queueRef = useRef<SpiderEvent[]>([])
+  const flushRef = useRef<number | null>(null)
+  const terminalRef = useRef(false)
 
-  const uniqueIntel = useMemo(() => uniqueKey(intel, (i) => `${i.type}:${i.value.toLowerCase()}`), [intel])
+  const uniqueIntel = useMemo(
+    () => uniqueKey(intel, (i) => `${i.type}:${i.site ?? ''}:${i.value.toLowerCase()}:${i.url ?? ''}:${i.source}`),
+    [intel],
+  )
   const uniqueScripts = useMemo(() => [...new Set(scripts)], [scripts])
   const uniqueSeeds = useMemo(() => uniqueKey(seeds, (s) => `${s.kind}:${s.url}`), [seeds])
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.close()
+      if (flushRef.current) cancelAnimationFrame(flushRef.current)
+    }
+  }, [])
 
   const reset = () => {
     setProbes([])
@@ -47,9 +61,12 @@ export default function App() {
     setSelected(null)
     setStats(emptyStats())
     setError(null)
+    queueRef.current = []
+    terminalRef.current = false
   }
 
   const stop = async () => {
+    genRef.current += 1
     sourceRef.current?.close()
     sourceRef.current = null
     if (jobRef.current) {
@@ -58,72 +75,166 @@ export default function App() {
     setRunning(false)
   }
 
+  const flush = () => {
+    flushRef.current = null
+    const batch = queueRef.current
+    if (!batch.length) return
+    queueRef.current = []
+    applyBatch(batch)
+  }
+
+  const enqueue = (event: SpiderEvent) => {
+    queueRef.current.push(event)
+    if (flushRef.current == null) {
+      flushRef.current = requestAnimationFrame(flush)
+    }
+  }
+
+  const applyBatch = (batch: SpiderEvent[]) => {
+    const nextProbes: ProbeResult[] = []
+    const nextForms: FormResult[] = []
+    const nextSeeds: SeedResult[] = []
+    const nextIntel: IntelResult[] = []
+    const nextScripts: string[] = []
+    const nextLogs: LogEvent[] = []
+    let lastStatus: Extract<SpiderEvent, { type: 'status' }> | null = null
+    let lastError: string | null = null
+
+    for (const event of batch) {
+      if (event.type === 'probe') nextProbes.push(event.probe)
+      else if (event.type === 'form') nextForms.push(event.form)
+      else if (event.type === 'seed') nextSeeds.push(event.seed)
+      else if (event.type === 'intel') nextIntel.push(event.intel)
+      else if (event.type === 'script') nextScripts.push(event.url)
+      else if (event.type === 'log') nextLogs.push(event.log)
+      else if (event.type === 'status') lastStatus = event
+      else if (event.type === 'error') lastError = event.message
+    }
+
+    if (nextProbes.length) setProbes((prev) => nextProbes.reduce(upsertProbe, prev))
+    if (nextForms.length) setForms((prev) => [...prev, ...nextForms])
+    if (nextSeeds.length) setSeeds((prev) => [...prev, ...nextSeeds])
+    if (nextIntel.length) setIntel((prev) => [...prev, ...nextIntel])
+    if (nextScripts.length) setScripts((prev) => [...prev, ...nextScripts])
+    if (nextLogs.length) setLogs((prev) => [...prev, ...nextLogs])
+    if (lastError) setError(lastError)
+    if (lastStatus) {
+      setStats(lastStatus.stats)
+      if (lastStatus.status === 'running') setStatusLabel(lastStatus.message || `Probing (${lastStatus.stats.probed})`)
+      if (lastStatus.status === 'done') {
+        terminalRef.current = true
+        setStatusLabel(lastStatus.message || `Complete — ${lastStatus.stats.probed} URLs`)
+        setRunning(false)
+        sourceRef.current?.close()
+      }
+      if (lastStatus.status === 'stopped') {
+        terminalRef.current = true
+        setStatusLabel('Stopped')
+        setRunning(false)
+        sourceRef.current?.close()
+      }
+      if (lastStatus.status === 'error') {
+        terminalRef.current = true
+        setStatusLabel('Error')
+        setError(lastStatus.message ?? 'Job failed')
+        setRunning(false)
+        sourceRef.current?.close()
+      }
+    }
+  }
+
+  const connectEvents = (jobId: string, gen: number, attempt = 0) => {
+    if (genRef.current !== gen) return
+    sourceRef.current?.close()
+    const source = new EventSource(`/api/spider/${jobId}/events`)
+    sourceRef.current = source
+    source.onmessage = (message) => {
+      if (genRef.current !== gen) return
+      try {
+        enqueue(JSON.parse(message.data) as SpiderEvent)
+      } catch {
+        /* ignore malformed frames */
+      }
+    }
+    source.onerror = () => {
+      source.close()
+      if (genRef.current !== gen || terminalRef.current) return
+      if (attempt >= 6) {
+        void recoverSnapshot(jobId, gen)
+        return
+      }
+      window.setTimeout(() => {
+        if (genRef.current !== gen || terminalRef.current) return
+        resetCollections()
+        connectEvents(jobId, gen, attempt + 1)
+      }, Math.min(400 * 2 ** attempt, 4000))
+    }
+  }
+
+  const resetCollections = () => {
+    setProbes([])
+    setForms([])
+    setSeeds([])
+    setIntel([])
+    setScripts([])
+    setLogs([])
+    setStats(emptyStats())
+  }
+
+  const recoverSnapshot = async (jobId: string, gen: number) => {
+    if (genRef.current !== gen || terminalRef.current) return
+    try {
+      const res = await fetch(`/api/spider/${jobId}`)
+      if (genRef.current !== gen) return
+      if (res.status === 404) {
+        setError('Lost job stream (job expired or server restarted)')
+        setRunning(false)
+        setStatusLabel('Disconnected')
+        return
+      }
+      if (!res.ok) throw new Error('snapshot failed')
+      const snap = (await res.json()) as { status: string; events: SpiderEvent[] }
+      resetCollections()
+      applyBatch(snap.events)
+      if (snap.status === 'running') {
+        connectEvents(jobId, gen, 6)
+        return
+      }
+      terminalRef.current = true
+      setRunning(false)
+    } catch {
+      setError('Connection lost. Stop and re-run if the job is still going.')
+      setRunning(false)
+      setStatusLabel('Disconnected')
+    }
+  }
+
   const run = async () => {
     await stop()
+    const gen = genRef.current
     reset()
     setRunning(true)
-    setStatusLabel(isEmailSeed(options.target) ? 'Starting email OSINT…' : 'Starting…')
-    if (isEmailSeed(options.target)) setTab('Intel')
+    const kind = peekSeedKind(options.target)
+    setStatusLabel(kind === 'url' || kind === 'unknown' ? 'Starting…' : `Starting ${kind} OSINT…`)
+    if (kind === 'email' || kind === 'username' || kind === 'phone') setTab('Intel')
     try {
       const res = await fetch('/api/spider', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(options),
       })
-      const body = (await res.json()) as { id?: string; error?: string }
+      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string }
+      if (genRef.current !== gen) return
       if (!res.ok || !body.id) {
-        throw new Error(body.error || 'Could not start spider')
+        throw new Error(body.error || 'Could not start job')
       }
       jobRef.current = body.id
-      const source = new EventSource(`/api/spider/${body.id}/events`)
-      sourceRef.current = source
-      source.onmessage = (message) => {
-        const event = JSON.parse(message.data) as SpiderEvent
-        applyEvent(event)
-      }
-      source.onerror = () => {
-        source.close()
-        setRunning(false)
-      }
+      connectEvents(body.id, gen)
     } catch (err) {
+      if (genRef.current !== gen) return
       setRunning(false)
       setError(err instanceof Error ? err.message : String(err))
       setStatusLabel('Blocked')
-    }
-  }
-
-  const applyEvent = (event: SpiderEvent) => {
-    if (event.type === 'probe') {
-      setProbes((prev) => upsertProbe(prev, event.probe))
-    } else if (event.type === 'form') {
-      setForms((prev) => [...prev, event.form])
-    } else if (event.type === 'seed') {
-      setSeeds((prev) => [...prev, event.seed])
-    } else if (event.type === 'intel') {
-      setIntel((prev) => [...prev, event.intel])
-    } else if (event.type === 'script') {
-      setScripts((prev) => [...prev, event.url])
-    } else if (event.type === 'log') {
-      setLogs((prev) => [...prev, event.log])
-    } else if (event.type === 'status') {
-      setStats(event.stats)
-      if (event.status === 'running') setStatusLabel(event.message || `Probing (${event.stats.probed})`)
-      if (event.status === 'done') {
-        setStatusLabel(event.message || `Complete — ${event.stats.probed} URLs`)
-        setRunning(false)
-        sourceRef.current?.close()
-      }
-      if (event.status === 'stopped') {
-        setStatusLabel('Stopped')
-        setRunning(false)
-      }
-      if (event.status === 'error') {
-        setStatusLabel('Error')
-        setError(event.message ?? 'Crawl failed')
-        setRunning(false)
-      }
-    } else if (event.type === 'error') {
-      setError(event.message)
     }
   }
 
@@ -135,19 +246,20 @@ export default function App() {
           <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted">OSINT Spider</div>
           <h1 className="text-2xl font-semibold tracking-tight">STRAND</h1>
           <p className="max-w-2xl text-sm text-muted">
-            Active and semi-passive recon: seed discovery, DOM link extraction, MIME and header inspection. Paste an email for public-records OSINT instead of a crawl.
+            Active and semi-passive recon: seed discovery, DOM link extraction, MIME and header inspection. Paste a URL,
+            email, username, or phone.
           </p>
         </div>
       </header>
       {error ? (
-        <div className="mb-4 rounded-xl border border-[#5a3030] bg-[#241616] px-3 py-2 text-sm text-[#f0c7c7]">{error}</div>
+        <div className="mb-4 rounded-xl border border-[#5a3030] bg-[#241616] px-3 py-3 text-sm text-[#f0c7c7]">{error}</div>
       ) : null}
       <div className="strand-shell flex flex-col gap-4 lg:h-[calc(100svh-9.5rem)] lg:flex-row">
-        <div className="strand-sidebar w-full shrink-0 lg:h-full lg:w-[320px]">
+        <div className="strand-sidebar w-full shrink-0 lg:h-full lg:w-[340px]">
           <ControlPanel options={options} running={running} onChange={setOptions} onRun={run} onStop={stop} />
         </div>
         <div className="strand-results flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-          <Metrics stats={stats} uniqueIntel={uniqueIntel.length} uniqueScripts={uniqueScripts.length} />
+          <Metrics stats={stats} uniqueIntel={uniqueIntel.length} uniqueScripts={uniqueScripts.length} running={running} />
           <Results
             tab={tab}
             onTab={setTab}
@@ -159,6 +271,7 @@ export default function App() {
             logs={logs}
             selected={selected}
             onSelect={setSelected}
+            running={running}
           />
         </div>
       </div>

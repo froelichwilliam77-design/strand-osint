@@ -15,7 +15,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed',
+        'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed',
         styles,
         className,
       )}
@@ -24,10 +24,13 @@ export function Button({
   )
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block space-y-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">{label}</span>
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">{label}</span>
+        {hint ? <span className="text-[11px] font-medium text-sage-dim">{hint}</span> : null}
+      </span>
       {children}
     </label>
   )
@@ -37,7 +40,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={cn(
-        'w-full rounded-xl border border-line bg-[#101310] px-3 py-2 text-sm text-ink-2 outline-none placeholder:text-[#5d6358] focus:border-sage-dim',
+        'w-full min-h-11 rounded-xl border border-line bg-[#101310] px-3 py-2.5 text-base text-ink-2 outline-none placeholder:text-[#5d6358] focus:border-sage-dim md:text-sm',
         className,
       )}
       {...props}
@@ -49,7 +52,7 @@ export function NativeSelect({ className, ...props }: SelectHTMLAttributes<HTMLS
   return (
     <select
       className={cn(
-        'w-full appearance-none rounded-xl border border-line bg-[#101310] px-3 py-2 text-sm text-ink-2 outline-none focus:border-sage-dim',
+        'w-full min-h-11 appearance-none rounded-xl border border-line bg-[#101310] px-3 py-2.5 text-base text-ink-2 outline-none focus:border-sage-dim md:text-sm',
         className,
       )}
       {...props}
@@ -98,24 +101,18 @@ export function Toggle({
   onChange: (checked: boolean) => void
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-3 py-1.5">
+    <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 py-2">
       <span className="text-sm text-fog">{label}</span>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={cn(
-          'relative h-5 w-9 rounded-full transition',
-          checked ? 'bg-sage' : 'bg-[#2a2f2a]',
-        )}
+        className={cn('relative h-7 w-12 shrink-0 rounded-full transition', checked ? 'bg-sage' : 'bg-[#2a2f2a]')}
       >
         <span
-          className={cn(
-            'absolute top-0.5 h-4 w-4 rounded-full bg-ink transition',
-            checked ? 'left-4.5' : 'left-0.5',
-          )}
-          style={{ left: checked ? 18 : 2 }}
+          className="absolute top-0.5 h-6 w-6 rounded-full bg-ink transition"
+          style={{ left: checked ? 22 : 2 }}
         />
       </button>
     </label>

@@ -11,7 +11,7 @@ import {
   resolveUrl,
   type Extraction,
 } from './extract.ts'
-import { isEmailSeed } from './email.ts'
+import { classifySeed } from './seed.ts'
 import { WELL_KNOWN_PATHS, type ProbeResult, type SecurityHeaders, type SpiderEvent, type SpiderOptions } from './types.ts'
 
 const BINARY_EXT =
@@ -32,8 +32,9 @@ export async function runSpider(
   emit: (event: SpiderEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  if (isEmailSeed(options.target)) {
-    throw new Error('Email seeds must use email investigation, not URL crawl')
+  const seed = classifySeed(options.target)
+  if (seed.kind !== 'url') {
+    throw new Error(`${seed.kind === 'unknown' ? 'This' : seed.kind} seed must not use the URL spider`)
   }
   const target = new URL(options.target)
   const safety = inspectUrlSafety(target.href)
@@ -223,11 +224,31 @@ export async function runSpider(
     }
     for (const email of extracted.emails) {
       intel += 1
-      emit({ type: 'intel', intel: { type: 'email', value: email.value, source: email.source } })
+      emit({
+        type: 'intel',
+        intel: {
+          type: 'email',
+          value: email.value,
+          source: email.source,
+          confidence: 'medium',
+          probed: false,
+          evidence: 'Harvested from page content (not a site-registration check)',
+        },
+      })
     }
     for (const phone of extracted.phones) {
       intel += 1
-      emit({ type: 'intel', intel: { type: 'phone', value: phone.value, source: phone.source } })
+      emit({
+        type: 'intel',
+        intel: {
+          type: 'phone',
+          value: phone.value,
+          source: phone.source,
+          confidence: 'medium',
+          probed: false,
+          evidence: 'Harvested from page content (not a live CNAM lookup)',
+        },
+      })
     }
     for (const link of extracted.links) {
       enqueue(link.url, item.depth + 1, link.source)

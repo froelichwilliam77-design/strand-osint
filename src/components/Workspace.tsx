@@ -1,26 +1,46 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Download, Radio, X } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { exportCsv, exportJson } from '@/lib/export'
-import type { FormResult, IntelResult, LogEvent, ProbeResult, SeedResult, SpiderStats } from '@/lib/utils'
+import {
+  isPrimaryIntel,
+  type FormResult,
+  type IntelResult,
+  type LogEvent,
+  type ProbeResult,
+  type SeedResult,
+  type SpiderStats,
+} from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
 const TABS = ['Endpoints', 'Headers', 'Forms', 'Seeds', 'Tree', 'Intel', 'Log'] as const
 export type Tab = (typeof TABS)[number]
 
-export function Metrics({ stats, uniqueIntel, uniqueScripts }: { stats: SpiderStats; uniqueIntel: number; uniqueScripts: number }) {
+export function Metrics({
+  stats,
+  uniqueIntel,
+  uniqueScripts,
+  running,
+}: {
+  stats: SpiderStats
+  uniqueIntel: number
+  uniqueScripts: number
+  running?: boolean
+}) {
   const items = [
-    { label: 'Probed', value: stats.probed, hint: 'URLs' },
+    { label: 'Probed', value: stats.probed, hint: 'HTTP checks' },
     { label: 'Forms', value: stats.forms, hint: 'extracted' },
     { label: 'Scripts', value: uniqueScripts || stats.scripts, hint: 'JS' },
-    { label: 'Intel', value: uniqueIntel || stats.intel, hint: 'emails / phones / sites' },
+    { label: 'Intel', value: uniqueIntel || stats.intel, hint: 'signals' },
   ]
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {items.map((item) => (
         <div key={item.label} className="rounded-2xl border border-line bg-panel px-4 py-3">
           <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">{item.label}</div>
-          <div className="mt-1 text-3xl font-semibold tracking-tight">{item.value}</div>
+          <div className={cn('mt-1 text-3xl font-semibold tracking-tight', running && item.value === 0 && 'text-muted')}>
+            {item.value}
+          </div>
           <div className="text-xs text-muted">{item.hint}</div>
         </div>
       ))}
@@ -39,6 +59,7 @@ export function Results({
   logs,
   selected,
   onSelect,
+  running,
 }: {
   tab: Tab
   onTab: (tab: Tab) => void
@@ -50,6 +71,7 @@ export function Results({
   logs: LogEvent[]
   selected: ProbeResult | null
   onSelect: (probe: ProbeResult | null) => void
+  running?: boolean
 }) {
   const canExport = probes.length + forms.length + intel.length + seeds.length > 0
   return (
@@ -87,14 +109,14 @@ export function Results({
         </div>
       </div>
       <div className="border-b border-line px-3 py-2">
-        <div className="flex gap-1 overflow-x-auto rounded-xl bg-[#0e100e] p-1">
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto rounded-xl bg-[#0e100e] p-1">
           {TABS.map((name) => (
             <button
               key={name}
               type="button"
               onClick={() => onTab(name)}
               className={cn(
-                'shrink-0 rounded-lg px-3 py-1.5 text-sm text-muted transition',
+                'shrink-0 rounded-lg px-3 py-2.5 text-sm text-muted transition min-h-10',
                 tab === name && 'tab-active',
               )}
             >
@@ -105,13 +127,17 @@ export function Results({
       </div>
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0 overflow-auto scrollbar-thin">
-          {tab === 'Endpoints' && <EndpointsTable probes={probes} selected={selected} onSelect={onSelect} />}
-          {tab === 'Headers' && <HeadersTable probes={probes.filter((p) => !p.skipped)} selected={selected} onSelect={onSelect} />}
-          {tab === 'Forms' && <FormsList forms={forms} />}
-          {tab === 'Seeds' && <SeedsList seeds={seeds} />}
-          {tab === 'Tree' && <UrlTree probes={probes} onSelect={onSelect} />}
-          {tab === 'Intel' && <IntelList intel={intel} />}
-          {tab === 'Log' && <LogList logs={logs} />}
+          {tab === 'Endpoints' && (
+            <EndpointsTable probes={probes} selected={selected} onSelect={onSelect} running={running} />
+          )}
+          {tab === 'Headers' && (
+            <HeadersTable probes={probes.filter((p) => !p.skipped)} selected={selected} onSelect={onSelect} running={running} />
+          )}
+          {tab === 'Forms' && <FormsList forms={forms} running={running} />}
+          {tab === 'Seeds' && <SeedsList seeds={seeds} running={running} />}
+          {tab === 'Tree' && <UrlTree probes={probes} onSelect={onSelect} running={running} />}
+          {tab === 'Intel' && <IntelList intel={intel} running={running} />}
+          {tab === 'Log' && <LogList logs={logs} running={running} />}
         </div>
         {selected && (tab === 'Endpoints' || tab === 'Headers' || tab === 'Tree') && (
           <HeaderInspector probe={selected} onClose={() => onSelect(null)} />
@@ -123,13 +149,13 @@ export function Results({
 
 function Empty({ title, hint }: { title: string; hint: string }) {
   return (
-    <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 text-center">
+    <div className="flex h-full min-h-64 flex-col items-center justify-center gap-3 px-4 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-line text-muted">
         <Radio className="h-5 w-5" />
       </div>
       <div>
         <div className="text-sm text-fog">{title}</div>
-        <div className="mt-1 text-xs text-muted">{hint}</div>
+        <div className="mt-1 max-w-sm text-xs text-muted">{hint}</div>
       </div>
     </div>
   )
@@ -139,12 +165,21 @@ function EndpointsTable({
   probes,
   selected,
   onSelect,
+  running,
 }: {
   probes: ProbeResult[]
   selected: ProbeResult | null
   onSelect: (probe: ProbeResult) => void
+  running?: boolean
 }) {
-  if (!probes.length) return <Empty title="No endpoints yet" hint="Run the spider against an authorized target or the Northline sample." />
+  if (!probes.length) {
+    return (
+      <Empty
+        title={running ? 'Probing…' : 'No endpoints yet'}
+        hint={running ? 'HTTP checks stream here as they complete.' : 'Run the spider against an authorized target or the Northline sample.'}
+      />
+    )
+  }
   return (
     <table className="w-full min-w-[640px] text-left text-sm">
       <thead className="sticky top-0 bg-panel text-[11px] uppercase tracking-[0.12em] text-muted">
@@ -186,12 +221,21 @@ function HeadersTable({
   probes,
   selected,
   onSelect,
+  running,
 }: {
   probes: ProbeResult[]
   selected: ProbeResult | null
   onSelect: (probe: ProbeResult) => void
+  running?: boolean
 }) {
-  if (!probes.length) return <Empty title="No headers yet" hint="Probed responses will show HSTS, CSP, XFO, cookies, and banners here." />
+  if (!probes.length) {
+    return (
+      <Empty
+        title={running ? 'Waiting on responses…' : 'No headers yet'}
+        hint="Probed responses will show HSTS, CSP, XFO, cookies, and banners here."
+      />
+    )
+  }
   return (
     <table className="w-full min-w-[720px] text-left text-sm">
       <thead className="sticky top-0 bg-panel text-[11px] uppercase tracking-[0.12em] text-muted">
@@ -224,8 +268,15 @@ function HeadersTable({
   )
 }
 
-function FormsList({ forms }: { forms: FormResult[] }) {
-  if (!forms.length) return <Empty title="No forms extracted" hint="HTML forms, including hidden CSRF fields, appear after a crawl." />
+function FormsList({ forms, running }: { forms: FormResult[]; running?: boolean }) {
+  if (!forms.length) {
+    return (
+      <Empty
+        title={running ? 'Looking for forms…' : 'No forms extracted'}
+        hint="HTML forms, including hidden CSRF fields, appear after a crawl."
+      />
+    )
+  }
   return (
     <div className="space-y-3 p-4">
       {forms.map((form, i) => (
@@ -249,8 +300,15 @@ function FormsList({ forms }: { forms: FormResult[] }) {
   )
 }
 
-function SeedsList({ seeds }: { seeds: SeedResult[] }) {
-  if (!seeds.length) return <Empty title="No seeds" hint="robots.txt, sitemaps, manifests, and well-known files show up here." />
+function SeedsList({ seeds, running }: { seeds: SeedResult[]; running?: boolean }) {
+  if (!seeds.length) {
+    return (
+      <Empty
+        title={running ? 'Seeding…' : 'No seeds'}
+        hint="robots.txt, sitemaps, manifests, well-known files, and identity seeds show up here."
+      />
+    )
+  }
   const unique = uniqueBy(seeds, (s) => `${s.kind}:${s.url}`)
   return (
     <ul className="divide-y divide-line">
@@ -265,34 +323,95 @@ function SeedsList({ seeds }: { seeds: SeedResult[] }) {
   )
 }
 
-function IntelList({ intel }: { intel: IntelResult[] }) {
+function IntelList({ intel, running }: { intel: IntelResult[]; running?: boolean }) {
+  const [showUnverified, setShowUnverified] = useState(false)
   if (!intel.length) {
     return (
       <Empty
-        title="No intel yet"
-        hint="Emails, phones, domains, and site candidates from crawls or email OSINT appear here."
+        title={running ? 'Collecting signals…' : 'No intel yet'}
+        hint="Verified and probed hits land here first. Unverified guesses stay labeled and secondary."
       />
     )
   }
+  const primary = intel.filter(isPrimaryIntel)
+  const unverified = intel.filter((i) => !isPrimaryIntel(i))
+  const shown = showUnverified ? intel : primary
   return (
-    <ul className="divide-y divide-line">
-      {intel.map((item) => (
-        <li key={`${item.type}:${item.value}`} className="flex items-baseline justify-between gap-3 px-4 py-2.5">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.12em] text-sage-dim">{item.type}</div>
-            <div className="font-mono text-sm">{item.value}</div>
-          </div>
-          <div className="truncate text-xs text-muted" title={item.source}>
-            {item.source}
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+        <div className="text-xs text-muted">
+          {primary.length} verified / probed
+          {unverified.length ? ` · ${unverified.length} unverified` : ''}
+        </div>
+        {unverified.length > 0 ? (
+          <button
+            type="button"
+            className="min-h-10 rounded-lg px-3 text-xs text-sage-dim hover:bg-raised"
+            onClick={() => setShowUnverified((v) => !v)}
+          >
+            {showUnverified ? 'Hide unverified' : 'Show unverified'}
+          </button>
+        ) : null}
+      </div>
+      <ul className="divide-y divide-line">
+        {shown.map((item, i) => (
+          <li key={`${item.type}:${item.site ?? ''}:${item.value}:${item.source}:${i}`} className="px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] uppercase tracking-[0.12em] text-sage-dim">{item.site || item.type}</span>
+              <ConfidenceBadge item={item} />
+            </div>
+            <div className="mt-1 break-all font-mono text-sm">{item.value}</div>
+            {item.url ? (
+              <div className="mt-0.5 truncate font-mono text-xs text-muted" title={item.url}>
+                {item.url}
+              </div>
+            ) : null}
+            <div className="mt-1 text-xs text-muted">{item.evidence || item.source}</div>
+          </li>
+        ))}
+      </ul>
+      {!showUnverified && unverified.length > 0 ? (
+        <p className="px-4 py-3 text-xs text-muted">
+          Unverified local-part variants are hidden. They are guesses, not account hits.
+        </p>
+      ) : null}
+    </div>
   )
 }
 
-function LogList({ logs }: { logs: LogEvent[] }) {
-  if (!logs.length) return <Empty title="Log is quiet" hint="Crawl events, robots skips, and fetch errors stream here." />
+function ConfidenceBadge({ item }: { item: IntelResult }) {
+  const label =
+    item.exists === true
+      ? 'registered'
+      : item.confidence === 'unverified'
+        ? 'unverified'
+        : item.confidence === 'high'
+          ? 'verified'
+          : item.confidence === 'medium'
+            ? 'probed'
+            : item.confidence === 'low'
+              ? 'low'
+              : item.probed
+                ? 'probed'
+                : 'harvested'
+  const tone =
+    item.confidence === 'unverified'
+      ? 'text-warn border-warn/40'
+      : item.exists === true || item.confidence === 'high'
+        ? 'text-sage-dim border-sage-dim/40'
+        : 'text-muted border-line'
+  return <span className={cn('rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.12em]', tone)}>{label}</span>
+}
+
+function LogList({ logs, running }: { logs: LogEvent[]; running?: boolean }) {
+  if (!logs.length) {
+    return (
+      <Empty
+        title={running ? 'Log is streaming…' : 'Log is quiet'}
+        hint="Crawl events, robots skips, presence checks, and fetch errors stream here."
+      />
+    )
+  }
   return (
     <ol className="space-y-1 p-3 font-mono text-xs">
       {logs.map((log, i) => (
@@ -314,9 +433,16 @@ function LogList({ logs }: { logs: LogEvent[] }) {
   )
 }
 
-function UrlTree({ probes, onSelect }: { probes: ProbeResult[]; onSelect: (probe: ProbeResult) => void }) {
+function UrlTree({ probes, onSelect, running }: { probes: ProbeResult[]; onSelect: (probe: ProbeResult) => void; running?: boolean }) {
   const tree = useMemo(() => buildTree(probes), [probes])
-  if (!probes.length) return <Empty title="No tree yet" hint="Discovered paths will nest under the target host." />
+  if (!probes.length) {
+    return (
+      <Empty
+        title={running ? 'Building tree…' : 'No tree yet'}
+        hint="Discovered paths will nest under the target host."
+      />
+    )
+  }
   return <div className="p-3 font-mono text-xs">{tree.map((node) => <TreeNodeView key={node.path} node={node} onSelect={onSelect} depth={0} />)}</div>
 }
 
@@ -386,7 +512,7 @@ function HeaderInspector({ probe, onClose }: { probe: ProbeResult; onClose: () =
           <div className="text-[11px] uppercase tracking-[0.14em] text-muted">Header inspector</div>
           <div className="mt-1 break-all font-mono text-xs">{probe.url}</div>
         </div>
-        <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-raised hover:text-ink-2">
+        <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-lg p-2 text-muted hover:bg-raised hover:text-ink-2">
           <X className="h-4 w-4" />
         </button>
       </div>

@@ -4,12 +4,16 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import { isEmailSeed, runEmailInvestigation } from './email.ts'
+import { runEmailInvestigation } from './email.ts'
+import { isAbortError } from './http.ts'
 import { NORTHLINE_ORIGIN, serveNorthline } from './northline.ts'
 import { parseOptions } from './options.ts'
+import { runPhoneInvestigation } from './phone.ts'
+import { classifySeed } from './seed.ts'
 import { runSpider } from './spider.ts'
 import { SsrfError } from './ssrf.ts'
-import type { SpiderEvent } from './types.ts'
+import type { SpiderEvent, SpiderOptions } from './types.ts'
+import { runUsernameInvestigation } from './username.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const isProd = process.env.NODE_ENV === 'production'
@@ -50,20 +54,29 @@ app.post('/api/spider', (req, res) => {
       status: 'running',
     }
     jobs.set(job.id, job)
-    const emailJob = isEmailSeed(options.target)
+    const kind = classifySeed(options.target).kind
     publish(job, {
       type: 'log',
       log: {
         ts: new Date().toISOString(),
         level: 'info',
-        message: emailJob
-          ? `Email investigation started for ${options.target}`
-          : `Spider started for ${options.target}`,
+        message: startMessage(kind, options.target),
       },
     })
-    const runner = emailJob ? runEmailInvestigation : runSpider
+    const runner = pickRunner(kind)
     void runner(options, (event) => publish(job, event), job.abort.signal)
       .catch((err: unknown) => {
+        if (job.abort.signal.aborted || isAbortError(err)) {
+          if (job.status === 'running') {
+            publish(job, {
+              type: 'status',
+              status: 'stopped',
+              stats: { probed: 0, forms: 0, scripts: 0, intel: 0, queued: 0, skipped: 0 },
+              message: 'Stopped',
+            })
+          }
+          return
+        }
         const message = err instanceof Error ? err.message : String(err)
         publish(job, { type: 'error', message })
         publish(job, {
@@ -93,9 +106,14 @@ app.get('/api/spider/:id/events', (req, res) => {
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache, no-transform',
     connection: 'keep-alive',
+    'x-accel-buffering': 'no',
   })
   const send = (event: SpiderEvent) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`)
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    } catch {
+      job.listeners.delete(send)
+    }
   }
   for (const event of job.events) send(event)
   job.listeners.add(send)
@@ -175,6 +193,24 @@ if (!process.argv[1] || fs.realpathSync(process.argv[1]) === fileURLToPath(impor
     console.error(err)
     process.exit(1)
   })
+}
+
+function startMessage(kind: string, target: string): string {
+  if (kind === 'email') return `Email investigation started for ${target}`
+  if (kind === 'username') return `Username investigation started for ${target}`
+  if (kind === 'phone') return `Phone investigation started for ${target}`
+  return `Spider started for ${target}`
+}
+
+function pickRunner(kind: string): (
+  options: SpiderOptions,
+  emit: (event: SpiderEvent) => void,
+  signal: AbortSignal,
+) => Promise<void> {
+  if (kind === 'email') return runEmailInvestigation
+  if (kind === 'username') return runUsernameInvestigation
+  if (kind === 'phone') return runPhoneInvestigation
+  return runSpider
 }
 
 export { app, parseOptions }

@@ -7,6 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 
 export type SpiderMode = 'semi-passive' | 'active'
 export type SpiderScope = 'same-host' | 'path-prefix'
+export type SeedKind = 'url' | 'email' | 'username' | 'phone' | 'unknown'
 
 export interface SpiderOptions {
   target: string
@@ -36,7 +37,7 @@ export interface SecurityHeaders {
 export interface ProbeResult {
   url: string
   finalUrl: string
-  method: 'GET' | 'HEAD'
+  method: 'GET' | 'HEAD' | 'POST'
   status: number
   contentType: string
   mime: string
@@ -64,15 +65,24 @@ export interface SeedResult {
   detail: string
 }
 
-export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx'
+export type IntelType = 'email' | 'phone' | 'site' | 'username' | 'domain' | 'mx' | 'account'
+export type IntelConfidence = 'high' | 'medium' | 'low' | 'unverified'
 
 export interface IntelResult {
   type: IntelType
   value: string
   source: string
+  confidence?: IntelConfidence
+  site?: string
+  url?: string
+  evidence?: string
+  probed?: boolean
+  exists?: boolean | null
 }
 
 const EMAIL_SEED_RE = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i
+const USERNAME_RE = /^@?[A-Za-z0-9](?:[A-Za-z0-9._-]{0,37}[A-Za-z0-9])?$/
+const HOST_LIKE_RE = /^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:[/:?#].*)?$/
 
 export function parseEmailSeed(raw: string): string | null {
   let s = raw.trim()
@@ -87,6 +97,33 @@ export function parseEmailSeed(raw: string): string | null {
 
 export function isEmailSeed(raw: string): boolean {
   return parseEmailSeed(raw) !== null
+}
+
+export function peekSeedKind(raw: string): SeedKind {
+  const trimmed = raw.trim()
+  if (!trimmed) return 'unknown'
+  if (/^https?:\/\//i.test(trimmed)) return 'url'
+  if (parseEmailSeed(trimmed)) return 'email'
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length >= 8 && digits.length <= 15 && /^\+?[0-9][0-9().\s-]{6,22}$/.test(trimmed) && !/[A-Za-z]/.test(trimmed)) {
+    return 'phone'
+  }
+  const handle = trimmed.replace(/^@/, '')
+  if ((trimmed.startsWith('@') || USERNAME_RE.test(trimmed)) && handle && !HOST_LIKE_RE.test(handle) && !/^[\d._-]+$/.test(handle)) {
+    return 'username'
+  }
+  if (HOST_LIKE_RE.test(trimmed) && !/\s/.test(trimmed)) return 'url'
+  if (USERNAME_RE.test(handle) && !/^[\d._-]+$/.test(handle)) return 'username'
+  return 'unknown'
+}
+
+export function isPrimaryIntel(item: IntelResult): boolean {
+  if (item.confidence === 'unverified') return false
+  if (item.exists === false) return false
+  if (item.exists === true) return true
+  if (item.confidence === 'high' || item.confidence === 'medium') return true
+  if (item.probed) return true
+  return !item.confidence
 }
 
 export interface LogEvent {

@@ -5,7 +5,6 @@ import {
   gravatarHash,
   parseEmailSeed,
   runEmailInvestigation,
-  socialProfileUrls,
 } from '../server/email.ts'
 import { parseOptions } from '../server/options.ts'
 import { runSpider } from '../server/spider.ts'
@@ -33,15 +32,15 @@ describe('email seed detection', () => {
     assert.equal(url.target, 'https://example.com/path')
   })
 
-  it('still reports Invalid URL for non-email garbage', () => {
-    assert.throws(() => parseOptions({ target: 'not a url' }), /Invalid URL/)
-    assert.throws(() => parseOptions({ target: '' }), /Target URL or email is required/)
+  it('still rejects non-email garbage with a parse error', () => {
+    assert.throws(() => parseOptions({ target: 'not a url' }), /Could not parse target/)
+    assert.throws(() => parseOptions({ target: '' }), /Target is required/)
     assert.throws(() => parseOptions({ target: 'http://127.0.0.1/' }), /Blocked/)
   })
 })
 
 describe('email investigation', () => {
-  it('emits local-part/domain intel, Gravatar probe, and unverified social candidates without crawling the email as a URL', async () => {
+  it('emits probed Gravatar/MX/holehe hits and does not dump unverified social URLs as findings', async () => {
     const probes: ProbeResult[] = []
     const intel: IntelResult[] = []
     const logs: string[] = []
@@ -57,11 +56,29 @@ describe('email investigation', () => {
       if (url.includes('gravatar.com') && url.includes('.json')) {
         return new Response('', { status: 404, headers: { 'content-type': 'application/json' } })
       }
+      if (url.includes('spclient.wg.spotify.com')) {
+        return new Response(JSON.stringify({ status: 20 }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.includes('api.github.com/search/users')) {
+        return new Response(JSON.stringify({ total_count: 1, items: [{ login: 'krystin', html_url: 'https://github.com/krystin' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('duolingo.com')) {
+        return new Response(JSON.stringify({ users: [{ username: 'krys' }] }), { status: 200 })
+      }
+      if (url.includes('keybase.io/_/api')) {
+        return new Response(JSON.stringify({ status: { code: 205 }, them: [] }), { status: 200 })
+      }
+      if (url.includes('github.com/Mitchellkrystin24') || url.includes('github.com/mitchellkrystin24')) {
+        return new Response('<html>profile</html>', { status: 200 })
+      }
       return new Response('', { status: 404 })
     }
 
     await runEmailInvestigation(
-      { ...DEFAULT_OPTIONS, target: 'Mitchellkrystin24@gmail.com', delayMs: 0 },
+      { ...DEFAULT_OPTIONS, target: 'Mitchellkrystin24@gmail.com', delayMs: 0, workers: 2 },
       (event: SpiderEvent) => {
         if (event.type === 'probe') probes.push(event.probe)
         if (event.type === 'intel') intel.push(event.intel)
@@ -78,10 +95,7 @@ describe('email investigation', () => {
       },
     )
 
-    assert.ok(
-      intel.some((i) => i.type === 'email' && i.value === 'Mitchellkrystin24@gmail.com'),
-      'seed email should be intel',
-    )
+    assert.ok(intel.some((i) => i.type === 'email' && i.value === 'Mitchellkrystin24@gmail.com'))
     assert.ok(intel.some((i) => i.type === 'username' && i.value === 'Mitchellkrystin24'))
     assert.ok(intel.some((i) => i.type === 'domain' && i.value === 'gmail.com'))
     assert.ok(intel.some((i) => i.type === 'mx' && i.value.includes('gmail-smtp-in.l.google.com')))
@@ -90,23 +104,32 @@ describe('email investigation', () => {
     const hash = gravatarHash('Mitchellkrystin24@gmail.com')
     assert.ok(probes.some((p) => p.url.includes(hash) && p.url.includes('gravatar.com')))
     assert.equal(
-      probes.some((p) => p.url.includes('Mitchellkrystin24@gmail.com')),
+      probes.some((p) => p.url === 'Mitchellkrystin24@gmail.com' || /^https?:\/\/Mitchellkrystin24@/i.test(p.url)),
       false,
-      'must not probe the email string as a URL',
+      'must not probe the email string as a crawl URL',
     )
-    assert.equal(fetched.some((u) => u.includes('Mitchellkrystin24@gmail.com')), false)
-    assert.ok(fetched.some((u) => u.includes('gravatar.com/avatar/')))
 
-    const github = intel.find((i) => i.type === 'site' && /github\.com\/Mitchellkrystin24/i.test(i.value))
-    assert.ok(github, 'GitHub candidate should be emitted')
-    assert.match(github!.source, /unverified/i)
+    const fakeSocial = intel.filter(
+      (i) => (i.type === 'site' || i.type === 'account') && /unverified/i.test(i.source) && /github\.com\/Mitchellkrystin24/i.test(i.value),
+    )
+    assert.equal(fakeSocial.length, 0, 'must not dump unverified GitHub URL guesses as findings')
+
+    const derived = intel.filter((i) => i.confidence === 'unverified')
+    assert.ok(derived.every((i) => i.type === 'username'))
+
+    assert.ok(
+      intel.some((i) => i.type === 'account' && i.site === 'Spotify' && i.exists === true),
+      'Spotify holehe-style hit should stream as registered',
+    )
+    assert.ok(intel.some((i) => i.type === 'account' && i.site === 'GitHub' && i.exists === true))
+    assert.ok(intel.some((i) => i.type === 'account' && i.site === 'Duolingo' && i.exists === true))
+    assert.equal(intel.some((i) => i.site === 'Keybase' && i.exists === true), false)
 
     const usernames = deriveUsernames('Mitchellkrystin24')
     assert.ok(usernames.some((u) => u.toLowerCase() === 'mitchellkrystin'))
-    assert.ok(socialProfileUrls('mitchellkrystin24').some((p) => p.network === 'Reddit'))
 
     assert.ok(logs.some((m) => /not crawling the address as a URL/i.test(m)))
-    assert.ok(logs.some((m) => /Holehe/i.test(m)))
+    assert.ok(logs.some((m) => /Holehe-style/i.test(m)))
   })
 
   it('records a Gravatar hit as intel when the public avatar exists', async () => {
@@ -140,9 +163,29 @@ describe('email investigation', () => {
       },
     )
 
-    assert.ok(intel.some((i) => i.source.includes('Gravatar avatar exists')))
+    assert.ok(intel.some((i) => i.source.includes('Gravatar avatar exists') && i.exists === true && i.confidence === 'high'))
     assert.ok(intel.some((i) => i.type === 'username' && i.value === 'Krystin'))
-    assert.ok(intel.some((i) => i.value === 'https://gravatar.com/krystin'))
+    assert.ok(intel.some((i) => i.value === 'https://gravatar.com/krystin' || i.url === 'https://gravatar.com/krystin'))
+  })
+
+  it('stops an email job on abort without throwing', async () => {
+    const abort = new AbortController()
+    abort.abort()
+    const statuses: string[] = []
+    await runEmailInvestigation(
+      { ...DEFAULT_OPTIONS, target: 'ops@northline.sample', delayMs: 0 },
+      (event) => {
+        if (event.type === 'status') statuses.push(event.status)
+      },
+      abort.signal,
+      {
+        fetch: async () => new Response('', { status: 404 }),
+        resolveMx: async () => [],
+        assertSafe: async (url) => new URL(url),
+      },
+    )
+    assert.ok(statuses.includes('stopped'))
+    assert.equal(statuses.includes('error'), false)
   })
 
   it('refuses to run the URL spider against an email seed', async () => {
@@ -153,7 +196,7 @@ describe('email investigation', () => {
           () => undefined,
           new AbortController().signal,
         ),
-      /email investigation/i,
+      /must not use the URL spider/i,
     )
   })
 })
