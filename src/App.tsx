@@ -3,6 +3,7 @@ import { ControlPanel } from '@/components/ControlPanel'
 import { Metrics, Results, type Tab } from '@/components/Workspace'
 import {
   defaultOptions,
+  isEmailSeed,
   type FormResult,
   type IntelResult,
   type LogEvent,
@@ -61,7 +62,8 @@ export default function App() {
     await stop()
     reset()
     setRunning(true)
-    setStatusLabel('Starting…')
+    setStatusLabel(isEmailSeed(options.target) ? 'Starting email OSINT…' : 'Starting…')
+    if (isEmailSeed(options.target)) setTab('Intel')
     try {
       const res = await fetch('/api/spider', {
         method: 'POST',
@@ -107,7 +109,7 @@ export default function App() {
       setStats(event.stats)
       if (event.status === 'running') setStatusLabel(event.message || `Probing (${event.stats.probed})`)
       if (event.status === 'done') {
-        setStatusLabel(`Complete — ${event.stats.probed} URLs`)
+        setStatusLabel(event.message || `Complete — ${event.stats.probed} URLs`)
         setRunning(false)
         sourceRef.current?.close()
       }
@@ -133,7 +135,7 @@ export default function App() {
           <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted">OSINT Spider</div>
           <h1 className="text-2xl font-semibold tracking-tight">STRAND</h1>
           <p className="max-w-2xl text-sm text-muted">
-            Active and semi-passive recon: seed discovery, DOM link extraction, MIME and header inspection.
+            Active and semi-passive recon: seed discovery, DOM link extraction, MIME and header inspection. Paste an email for public-records OSINT instead of a crawl.
           </p>
         </div>
       </header>

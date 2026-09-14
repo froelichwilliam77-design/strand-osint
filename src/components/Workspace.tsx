@@ -13,7 +13,7 @@ export function Metrics({ stats, uniqueIntel, uniqueScripts }: { stats: SpiderSt
     { label: 'Probed', value: stats.probed, hint: 'URLs' },
     { label: 'Forms', value: stats.forms, hint: 'extracted' },
     { label: 'Scripts', value: uniqueScripts || stats.scripts, hint: 'JS' },
-    { label: 'Intel', value: uniqueIntel || stats.intel, hint: 'emails / phones' },
+    { label: 'Intel', value: uniqueIntel || stats.intel, hint: 'emails / phones / sites' },
   ]
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -266,7 +266,14 @@ function SeedsList({ seeds }: { seeds: SeedResult[] }) {
 }
 
 function IntelList({ intel }: { intel: IntelResult[] }) {
-  if (!intel.length) return <Empty title="No intel yet" hint="Emails and phone numbers harvested from pages, headers, and comments." />
+  if (!intel.length) {
+    return (
+      <Empty
+        title="No intel yet"
+        hint="Emails, phones, domains, and site candidates from crawls or email OSINT appear here."
+      />
+    )
+  }
   return (
     <ul className="divide-y divide-line">
       {intel.map((item) => (
