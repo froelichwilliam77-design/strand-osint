@@ -1,0 +1,42 @@
+{
+  "name": "strand",
+  "private": true,
+  "version": "1.0.0",
+  "description": "STRAND — OSINT spider for authorized recon (seed discovery, DOM extraction, MIME/header inspection).",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "PORT=47632 tsx watch --exclude \"./src/**\" --exclude \"./dist/**\" server/index.ts",
+    "dev:client": "vite --host 127.0.0.1 --port 47631 --strictPort",
+    "build": "vite build",
+    "start": "NODE_ENV=production PORT=47631 tsx server/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "express": "^5.1.0",
+    "fast-xml-parser": "^5.2.5",
+    "lucide-react": "^0.544.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "robots-parser": "^3.0.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^9.2.1",
+    "oxlint": "^1.81.0",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.20.5",
+    "typescript": "~5.9.2",
+    "vite": "^8.3.0"
+  }
+}
