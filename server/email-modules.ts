@@ -228,14 +228,41 @@ export function interpretMicrosoftLive(status: number, body: string): PresenceOu
 export function interpretMicrosoftRealm(status: number, body: string): PresenceOutcome {
   if (status !== 200) return { exists: null, evidence: `HTTP ${status}` }
   try {
-    const parsed = JSON.parse(body) as { NameSpaceType?: string; DomainName?: string }
+    const parsed = JSON.parse(body) as {
+      NameSpaceType?: string
+      DomainName?: string
+      FederationBrandName?: string
+      Login?: string
+    }
     const kind = (parsed.NameSpaceType ?? '').toLowerCase()
-    if (kind === 'managed' || kind === 'federated') {
+    const brand = (parsed.FederationBrandName ?? '').toLowerCase()
+    const domain = (parsed.DomainName ?? '').toLowerCase()
+    const loginDomain = (parsed.Login ?? '').split('@')[1]?.toLowerCase() ?? ''
+    // Windows Live / live.com is Microsoft consumer routing, not proof of an M365 mailbox.
+    if (brand.includes('windows live') || domain === 'live.com') {
+      return { exists: false, evidence: 'GetUserRealm Windows Live routing (not an M365 tenant hit)' }
+    }
+    const consumer = new Set([
+      'gmail.com',
+      'googlemail.com',
+      'outlook.com',
+      'hotmail.com',
+      'live.com',
+      'msn.com',
+      'yahoo.com',
+      'icloud.com',
+      'proton.me',
+      'protonmail.com',
+      'aol.com',
+    ])
+    if (consumer.has(loginDomain)) {
+      return { exists: false, evidence: `GetUserRealm skipped for consumer mailbox ${loginDomain}` }
+    }
+    if ((kind === 'managed' || kind === 'federated') && domain && domain === loginDomain) {
       return {
         exists: true,
         confidence: 'medium',
-        evidence: `GetUserRealm NameSpaceType ${parsed.NameSpaceType} (tenant exists; not proof of this mailbox)`,
-        extra: parsed.DomainName,
+        evidence: `GetUserRealm NameSpaceType ${parsed.NameSpaceType} for ${domain} (tenant exists; mailbox not proven)`,
       }
     }
     if (kind === 'unknown' || kind === '') {

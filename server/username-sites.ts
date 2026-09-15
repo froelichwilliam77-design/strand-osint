@@ -2,6 +2,10 @@ import type { PresenceOutcome, UsernameSite } from './presence.ts'
 
 const NOT_FOUND = /page not found|doesn'?t exist|user not found|couldn'?t find|not found|no such user|sorry, this page isn'?t available|this account doesn'?t exist|could not find/i
 
+/** Real profile pages — never site-name branding or a bare og:title. */
+export const PROFILE_MARKERS =
+  /og:type" content="profile"|property="og:type" content="profile"|profile:username|itemprop="name"|ProfilePage/i
+
 export function interpretJsonUser(
   status: number,
   body: string,
@@ -102,13 +106,13 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'codeberg',
     name: 'Codeberg',
     url: (u) => `https://codeberg.org/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type|vcard|itemprop="name"/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'sourcehut',
     name: 'SourceHut',
     url: (u) => `https://sr.ht/~${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /sourcehut|~[A-Za-z0-9]/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title" content="~|itemprop="name"/i),
   },
   {
     id: 'reddit',
@@ -165,13 +169,13 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'npm',
     name: 'npm',
     url: (u) => `https://www.npmjs.com/~${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /npmjs|packages by|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /packages by|npm-user/i),
   },
   {
     id: 'pypi',
     name: 'PyPI',
     url: (u) => `https://pypi.org/user/${encodeURIComponent(u)}/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /pypi|packages|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /pypi\.org\/user\/|packages by/i),
   },
   {
     id: 'crates',
@@ -192,31 +196,33 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'huggingface',
     name: 'Hugging Face',
     url: (u) => `https://huggingface.co/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /huggingface|og:title|avatar/i),
+    interpret: (status, body, finalUrl) =>
+      interpretStrictProfile(status, body, finalUrl, /og:url" content="https:\/\/huggingface\.co\/[^/"?\s]+/i),
   },
   {
     id: 'replit',
     name: 'Replit',
     url: (u) => `https://replit.com/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|profile|@/i),
+    interpret: (status, body, finalUrl) =>
+      interpretStrictProfile(status, body, finalUrl, /og:url" content="https:\/\/replit\.com\/@|property="og:title" content="[^"]+ on Replit"/i),
   },
   {
     id: 'codepen',
     name: 'CodePen',
     url: (u) => `https://codepen.io/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|profile/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'devto',
     name: 'Dev.to',
     url: (u) => `https://dev.to/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type|profile|DEV Community/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'hashnode',
     name: 'Hashnode',
     url: (u) => `https://hashnode.com/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|hashnode/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'medium',
@@ -228,25 +234,25 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'producthunt',
     name: 'Product Hunt',
     url: (u) => `https://www.producthunt.com/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Product Hunt/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'lobsters',
     name: 'Lobsters',
     url: (u) => `https://lobste.rs/u/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /joined|karma|lobste/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /joined|karma:/i),
   },
   {
     id: 'lemmy',
     name: 'Lemmy',
     url: (u) => `https://lemmy.world/u/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|lemmy/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'mastodon',
     name: 'Mastodon',
     url: (u) => `https://mastodon.social/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type" content="profile"|mastodon/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'bluesky',
@@ -328,55 +334,55 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'lastfm',
     name: 'Last.fm',
     url: (u) => `https://www.last.fm/user/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type" content="profile"|scrobble|last\.fm/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'spotify',
     name: 'Spotify',
     url: (u) => `https://open.spotify.com/user/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Spotify/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'vimeo',
     name: 'Vimeo',
     url: (u) => `https://vimeo.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type|profile/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'flickr',
     name: 'Flickr',
     url: (u) => `https://www.flickr.com/people/${encodeURIComponent(u)}/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type" content="profile"|flickr/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'deviantart',
     name: 'DeviantArt',
     url: (u) => `https://www.deviantart.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|deviantart/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'behance',
     name: 'Behance',
     url: (u) => `https://www.behance.net/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Behance/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'dribbble',
     name: 'Dribbble',
     url: (u) => `https://dribbble.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Dribbble/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'pinterest',
     name: 'Pinterest',
     url: (u) => `https://www.pinterest.com/${encodeURIComponent(u)}/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type" content="profile"|pinterest/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:type" content="profile"/i),
   },
   {
     id: 'tumblr',
     name: 'Tumblr',
     url: (u) => `https://${encodeURIComponent(u)}.tumblr.com/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /tumblr|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'linktree',
@@ -411,43 +417,44 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'buymeacoffee',
     name: 'Buy Me a Coffee',
     url: (u) => `https://www.buymeacoffee.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /buymeacoffee|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'kofi',
     name: 'Ko-fi',
     url: (u) => `https://ko-fi.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /ko-fi|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'patreon',
     name: 'Patreon',
     url: (u) => `https://www.patreon.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Patreon/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'venmo',
     name: 'Venmo',
     url: (u) => `https://account.venmo.com/u/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Venmo/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'cashapp',
     name: 'Cash App',
     url: (u) => `https://cash.app/$${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /cash app|cashtag|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'paypal',
     name: 'PayPal.me',
     url: (u) => `https://www.paypal.me/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /paypal|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'snapchat',
     name: 'Snapchat',
     url: (u) => `https://www.snapchat.com/add/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Snapchat/i),
+    interpret: (status, body, finalUrl) =>
+      interpretStrictProfile(status, body, finalUrl, /ProfilePage|"is on Snapchat"|og:title" content="[^"]+on Snapchat/i),
   },
   {
     id: 'tiktok',
@@ -500,7 +507,7 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'threads',
     name: 'Threads',
     url: (u) => `https://www.threads.net/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Threads/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'wikipedia',
@@ -518,19 +525,19 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'letterboxd',
     name: 'Letterboxd',
     url: (u) => `https://letterboxd.com/${encodeURIComponent(u)}/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /letterboxd|og:title|films/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'myanimelist',
     name: 'MyAnimeList',
     url: (u) => `https://myanimelist.net/profile/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /myanimelist|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'anilist',
     name: 'AniList',
     url: (u) => `https://anilist.co/user/${encodeURIComponent(u)}/`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /anilist|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /"user-name"|og:url" content="[^"]+\/user\//i),
   },
   {
     id: 'lichess',
@@ -553,7 +560,7 @@ export const USERNAME_SITES: UsernameSite[] = [
     interpret: (status, body) => {
       if (status === 404) return { exists: false, evidence: 'HTTP 404' }
       if (/The specified profile could not be found/i.test(body)) return { exists: false, evidence: 'Steam missing profile' }
-      if (status === 200 && /og:type|profile_header|steamcommunity/i.test(body) && !/could not be found/i.test(body)) {
+      if (status === 200 && /profile_header|og:type" content="profile"/i.test(body) && !/could not be found/i.test(body)) {
         return { exists: true, evidence: 'Steam profile page' }
       }
       if (status === 200) return { exists: null, evidence: 'Steam 200 without profile marker' }
@@ -588,7 +595,7 @@ export const USERNAME_SITES: UsernameSite[] = [
     interpret: (status, body) => {
       if (status === 404) return { exists: false, evidence: 'HTTP 404' }
       if (/We couldn't find/i.test(body)) return { exists: false, evidence: 'NameMC missing profile' }
-      if (status === 200 && /Minecraft Profile|og:title/i.test(body)) return { exists: true, evidence: 'NameMC profile' }
+      if (status === 200 && /Minecraft Profile|namemc\.com\/profile\//i.test(body)) return { exists: true, evidence: 'NameMC profile' }
       if (status === 200) return { exists: null, evidence: 'NameMC 200 without profile marker' }
       return { exists: null, evidence: `HTTP ${status}` }
     },
@@ -597,12 +604,12 @@ export const USERNAME_SITES: UsernameSite[] = [
     id: 'kaggle',
     name: 'Kaggle',
     url: (u) => `https://www.kaggle.com/${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /og:title|Kaggle/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
   {
     id: 'observable',
     name: 'Observable',
     url: (u) => `https://observablehq.com/@${encodeURIComponent(u)}`,
-    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, /observable|og:title/i),
+    interpret: (status, body, finalUrl) => interpretStrictProfile(status, body, finalUrl, PROFILE_MARKERS),
   },
 ]

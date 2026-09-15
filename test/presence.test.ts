@@ -69,9 +69,16 @@ describe('holehe-style interpreters', () => {
     assert.equal(interpretLastpass(200, 'ok').exists, false)
     assert.equal(interpretMicrosoftLive(200, JSON.stringify({ IfExistsResult: 0 })).exists, true)
     assert.equal(interpretMicrosoftLive(200, JSON.stringify({ IfExistsResult: 1 })).exists, false)
-    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed' })).exists, true)
-    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed' })).confidence, 'medium')
+    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed', DomainName: 'contoso.com', Login: 'ada@contoso.com' })).exists, true)
+    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed', DomainName: 'contoso.com', Login: 'ada@contoso.com' })).confidence, 'medium')
     assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Unknown' })).exists, false)
+    assert.equal(
+      interpretMicrosoftRealm(
+        200,
+        JSON.stringify({ NameSpaceType: 'Federated', DomainName: 'live.com', FederationBrandName: 'Windows Live', Login: 'test@gmail.com' }),
+      ).exists,
+      false,
+    )
     assert.equal(interpretProtonmail(200, 'info:1:1\n2048:1::').exists, true)
     assert.equal(interpretProtonmail(200, 'info:1:0').exists, false)
     assert.equal(interpretFreelancer(409, '{"error":"EMAIL_ALREADY_IN_USE"}').exists, true)
@@ -157,9 +164,44 @@ describe('username investigation', () => {
     assert.equal(intel.some((i) => i.site === 'Linktree' && i.exists === true), false)
     assert.equal(intel.some((i) => i.site === 'npm' && i.exists === true), false)
     assert.equal(intel.some((i) => i.site === 'Instagram' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Pinterest' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Snapchat' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'AniList' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Hugging Face' && i.exists === true), false)
     const weak = intel.filter((i) => i.exists === null && i.confidence === 'low')
     assert.ok(weak.length > 0, 'inconclusive checks should stream as low-confidence intel')
     assert.ok(weak.every((i) => !isPrimaryIntel(i)))
+  })
+
+  it('does not treat site-branding HTML as a registered profile', () => {
+    const branding =
+      '<html><title>Home</title><meta property="og:title" content="Pinterest"><body>AniList Snapchat Hugging Face Replit Mastodon Tumblr Spotify Flickr DeviantArt Behance Venmo MyAnimeList Kaggle Lemmy</body></html>'
+    for (const id of [
+      'pinterest',
+      'snapchat',
+      'anilist',
+      'huggingface',
+      'replit',
+      'mastodon',
+      'tumblr',
+      'spotify',
+      'flickr',
+      'deviantart',
+      'behance',
+      'venmo',
+      'myanimelist',
+      'kaggle',
+      'lemmy',
+    ]) {
+      const site = USERNAME_SITES.find((s) => s.id === id)
+      assert.ok(site, id)
+      assert.notEqual(site!.interpret(200, branding, `https://example.invalid/${id}`).exists, true, id)
+    }
+    const pin = USERNAME_SITES.find((s) => s.id === 'pinterest')!
+    assert.equal(
+      pin.interpret(200, '<meta property="og:type" content="profile">', 'https://www.pinterest.com/ada/').exists,
+      true,
+    )
   })
 
   it('stops username probes when aborted mid-pool', async () => {
