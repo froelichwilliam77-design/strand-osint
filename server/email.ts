@@ -107,7 +107,7 @@ export async function runEmailInvestigation(
 ): Promise<void> {
   const parts = splitEmail(options.target)
   const resolveMx = deps.resolveMx ?? ((domain: string) => dns.resolveMx(domain))
-  const counters = { probed: 0, skipped: 0, intel: 0 }
+  const counters = { probed: 0, skipped: 0, intel: 0, registered: 0, notFound: 0, inconclusive: 0 }
 
   const stats = () => ({
     probed: counters.probed,
@@ -263,7 +263,6 @@ export async function runEmailInvestigation(
     log('warn', `Gravatar profile check skipped: ${errMessage(err)}`)
   }
 
-  log('info', 'Holehe-style site checks (register/login/public APIs only; never password-reset or SMTP)')
   try {
     await runEmailModules(parts.email, options, emit, signal, deps, counters)
   } catch (err) {
@@ -347,7 +346,7 @@ export async function runEmailInvestigation(
 
   log(
     'info',
-    `Done — email OSINT ${counters.probed} HTTP checks, ${counters.intel} intel (verified/probed first; unverified handles labeled)`,
+    `Done — email OSINT ${counters.probed} HTTP checks, ${counters.intel} intel (${counters.registered} registered site hits)`,
   )
   emit({ type: 'status', status: 'done', stats: stats(), message: `Complete — ${counters.intel} intel (email OSINT)` })
 }

@@ -48,13 +48,13 @@ Public records only:
 - Local-part / domain split, consumer-mailbox hints, small disposable-domain list
 - DNS MX
 - Gravatar existence (public MD5 avatar + profile JSON)
-- **Holehe-style site checks** for a practical set (GitHub public email search, Keybase, Duolingo, Spotify, WordPress.com, Imgur, Pinterest, Tumblr, Chess.com). Register / login / public APIs only — **never password-reset** (that would contact the mailbox)
-- Public **profile probes** for the local-part handle (GitHub, GitLab, Reddit, HN, npm, …). Hits are HTTP-confirmed pages
-- Derived username variants are **unverified** and secondary in the Intel tab — not dumped as fake social findings
+- **Holehe-style site checks** across **dozens** of popular sites (GitHub, Microsoft account, Firefox, Spotify, Discord, Docker Hub, Patreon, HubSpot, ProtonMail PKS, …). Register / login / public APIs only — **never password-reset** (that would contact the mailbox). Results are marked registered / not registered / inconclusive
+- Public **profile probes** for the local-part handle across major networks (GitHub API, GitLab, Reddit, Bluesky, Lichess, Steam, Roblox, …). Hits require real exists heuristics — a generic HTTP 200 is not a finding
+- Intel ranks **confirmed registrations first**. Inconclusive checks and derived username variants stay behind **Show unverified**
 
 ### Username
 
-SSRF-guarded GET of public profile URLs. Confirmed pages stream into Intel / Endpoints with confidence. Inconclusive login walls are logged, not treated as hits.
+SSRF-guarded GET/POST of public profile URLs and APIs (up to 6 workers with delay jitter). Confirmed pages stream into Intel first. Inconclusive login walls are weak signals, not hits.
 
 ### Phone
 
@@ -67,7 +67,7 @@ SSRF-guarded GET of public profile URLs. Confirmed pages stream into Intel / End
 - Semi-passive mode sends `HEAD` for binaries and never submits forms. Active mode GETs binary bodies; forms are still never submitted.
 - Default scope is same host. Path-prefix scope stays under the target path.
 - Default is to honor `robots.txt`. Rate limit with **Delay** and **Workers**.
-- Presence checks share those SSRF guards and a small worker pool.
+- Presence checks share those SSRF guards, a worker pool (up to 6), and per-request delays so bulk email/username sweeps do not stampede.
 
 ## Tests
 

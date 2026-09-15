@@ -1,18 +1,29 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  HOLEHE_EMAIL_MODULES,
+  USERNAME_SITES,
   interpretChess,
   interpretDuolingo,
+  interpretFirefox,
+  interpretFreelancer,
   interpretGithubSearch,
+  interpretHubspot,
   interpretImgur,
   interpretKeybase,
+  interpretLastpass,
+  interpretMicrosoftLive,
+  interpretMicrosoftRealm,
   interpretPinterest,
+  interpretProtonmail,
   interpretSpotify,
   interpretTumblr,
+  interpretTwitterEmail,
   interpretWordpress,
 } from '../server/presence.ts'
 import { runUsernameInvestigation } from '../server/username.ts'
 import { DEFAULT_OPTIONS, type IntelResult, type SpiderEvent } from '../server/types.ts'
+import { isPrimaryIntel, sortIntel } from '../src/lib/utils.ts'
 
 describe('holehe-style interpreters', () => {
   it('treats Spotify status 20 as registered and 1 as available', () => {
@@ -48,6 +59,52 @@ describe('holehe-style interpreters', () => {
     assert.equal(interpretChess(200, JSON.stringify({ isEmailAvailable: false })).exists, true)
     assert.equal(interpretChess(200, JSON.stringify({ isEmailAvailable: true })).exists, false)
   })
+
+  it('reads Firefox, Twitter, LastPass, Microsoft, ProtonMail, Freelancer, HubSpot', () => {
+    assert.equal(interpretFirefox(200, JSON.stringify({ exists: true })).exists, true)
+    assert.equal(interpretFirefox(200, JSON.stringify({ exists: false })).exists, false)
+    assert.equal(interpretTwitterEmail(200, JSON.stringify({ taken: true })).exists, true)
+    assert.equal(interpretTwitterEmail(200, JSON.stringify({ taken: false })).exists, false)
+    assert.equal(interpretLastpass(200, 'no').exists, true)
+    assert.equal(interpretLastpass(200, 'ok').exists, false)
+    assert.equal(interpretMicrosoftLive(200, JSON.stringify({ IfExistsResult: 0 })).exists, true)
+    assert.equal(interpretMicrosoftLive(200, JSON.stringify({ IfExistsResult: 1 })).exists, false)
+    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed' })).exists, true)
+    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Managed' })).confidence, 'medium')
+    assert.equal(interpretMicrosoftRealm(200, JSON.stringify({ NameSpaceType: 'Unknown' })).exists, false)
+    assert.equal(interpretProtonmail(200, 'info:1:1\n2048:1::').exists, true)
+    assert.equal(interpretProtonmail(200, 'info:1:0').exists, false)
+    assert.equal(interpretFreelancer(409, '{"error":"EMAIL_ALREADY_IN_USE"}').exists, true)
+    assert.equal(interpretFreelancer(200, '{}').exists, false)
+    assert.equal(interpretHubspot(400, JSON.stringify({ status: 'INVALID_PASSWORD' })).exists, true)
+    assert.equal(interpretHubspot(400, JSON.stringify({ status: 'INVALID_USER' })).exists, false)
+  })
+
+  it('covers dozens of email modules and username sites', () => {
+    assert.ok(HOLEHE_EMAIL_MODULES.length >= 40, `expected dozens of email modules, got ${HOLEHE_EMAIL_MODULES.length}`)
+    assert.ok(USERNAME_SITES.length >= 40, `expected dozens of username sites, got ${USERNAME_SITES.length}`)
+    assert.equal(
+      HOLEHE_EMAIL_MODULES.some((m) => /reset/i.test(m.method) || /reset/i.test(m.id)),
+      false,
+      'must not include password-reset modules',
+    )
+  })
+})
+
+describe('intel ranking', () => {
+  it('surfaces registered hits first and buries inconclusive / unverified', () => {
+    const ranked = sortIntel([
+      { type: 'username', value: 'guess', source: 'derived', confidence: 'unverified' },
+      { type: 'domain', value: 'gmail.com', source: 'email domain', confidence: 'high' },
+      { type: 'account', value: 'Site · inconclusive', source: 'check', confidence: 'low', exists: null, probed: true },
+      { type: 'account', value: 'Spotify · registered', site: 'Spotify', source: 'check', confidence: 'high', exists: true, probed: true },
+    ])
+    assert.equal(ranked[0]?.exists, true)
+    assert.equal(ranked[1]?.value, 'gmail.com')
+    assert.equal(ranked.at(-1)?.confidence, 'unverified')
+    assert.equal(isPrimaryIntel(ranked[0]!), true)
+    assert.equal(isPrimaryIntel({ type: 'account', value: 'x', source: 'c', confidence: 'low', exists: null, probed: true }), false)
+  })
 })
 
 describe('username investigation', () => {
@@ -56,7 +113,12 @@ describe('username investigation', () => {
     const logs: string[] = []
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input)
-      if (url.includes('github.com/octocat')) return new Response('profile', { status: 200 })
+      if (url.includes('api.github.com/users/octocat')) {
+        return new Response(JSON.stringify({ login: 'octocat', type: 'User', html_url: 'https://github.com/octocat' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       return new Response('missing', { status: 404 })
     }
     await runUsernameInvestigation(
@@ -76,6 +138,7 @@ describe('username investigation', () => {
       'username mode should not invent unverified social URLs',
     )
     assert.ok(logs.some((m) => /GitHub: registered/i.test(m)))
+    assert.ok(logs.some((m) => /Presence sweep/i.test(m)))
   })
 
   it('does not treat a generic 200 as an About.me/Twitch hit', async () => {
@@ -92,5 +155,29 @@ describe('username investigation', () => {
     assert.equal(intel.some((i) => i.site === 'About.me' && i.exists === true), false)
     assert.equal(intel.some((i) => i.site === 'Twitch' && i.exists === true), false)
     assert.equal(intel.some((i) => i.site === 'Linktree' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'npm' && i.exists === true), false)
+    assert.equal(intel.some((i) => i.site === 'Instagram' && i.exists === true), false)
+    const weak = intel.filter((i) => i.exists === null && i.confidence === 'low')
+    assert.ok(weak.length > 0, 'inconclusive checks should stream as low-confidence intel')
+    assert.ok(weak.every((i) => !isPrimaryIntel(i)))
+  })
+
+  it('stops username probes when aborted mid-pool', async () => {
+    const abort = new AbortController()
+    const statuses: string[] = []
+    const fetchImpl: typeof fetch = async () => {
+      abort.abort()
+      throw new Error('aborted')
+    }
+    await runUsernameInvestigation(
+      { ...DEFAULT_OPTIONS, target: 'octocat', delayMs: 0, workers: 2 },
+      (event) => {
+        if (event.type === 'status') statuses.push(event.status)
+      },
+      abort.signal,
+      { fetch: fetchImpl, assertSafe: async (url) => new URL(url) },
+    )
+    assert.ok(statuses.includes('stopped'))
+    assert.equal(statuses.includes('error'), false)
   })
 })

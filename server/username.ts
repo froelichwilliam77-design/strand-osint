@@ -10,7 +10,7 @@ export async function runUsernameInvestigation(
 ): Promise<void> {
   const username = options.target.replace(/^@/, '').trim()
   if (!username) throw new Error('Not a username seed')
-  const counters = { probed: 0, skipped: 0, intel: 0 }
+  const counters = { probed: 0, skipped: 0, intel: 0, registered: 0, notFound: 0, inconclusive: 0 }
   const stats = () => ({
     probed: counters.probed,
     forms: 0,
@@ -55,6 +55,6 @@ export async function runUsernameInvestigation(
     return
   }
 
-  log('info', `Done — username OSINT ${counters.probed} HTTP checks, ${counters.intel} intel`)
+  log('info', `Done — username OSINT ${counters.probed} HTTP checks, ${counters.intel} intel (${counters.registered} registered)`)
   emit({ type: 'status', status: 'done', stats: stats(), message: `Complete — ${counters.intel} intel (username OSINT)` })
 }

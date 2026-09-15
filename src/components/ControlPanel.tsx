@@ -46,8 +46,10 @@ export function ControlPanel({
           />
         </Field>
         <p className="text-xs leading-5 text-muted">
-          {kind === 'email' && 'Public records only: MX, Gravatar, holehe-style site checks. Never emails the mailbox.'}
-          {kind === 'username' && 'Probes public profile URLs. Hits are confirmed pages, not guesses.'}
+          {kind === 'email' &&
+            'Public records only: MX, Gravatar, and dozens of holehe-style site checks. Never emails the mailbox.'}
+          {kind === 'username' &&
+            'Probes dozens of public profiles with real exists heuristics. Hits are confirmed pages, not generic 200s.'}
           {kind === 'phone' && 'Normalizes E.164 and numbering-plan metadata. No CNAM, SMS, or live carrier dips.'}
           {kind === 'url' && 'Authorized crawl: seeds, DOM extraction, headers. Private/loopback targets are blocked.'}
           {kind === 'unknown' && 'Paste https://…, name@domain, @handle, or +1…'}

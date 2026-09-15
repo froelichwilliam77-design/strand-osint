@@ -65,6 +65,9 @@ describe('email investigation', () => {
           headers: { 'content-type': 'application/json' },
         })
       }
+      if (url.includes('api.github.com/users/')) {
+        return new Response('', { status: 404 })
+      }
       if (url.includes('duolingo.com')) {
         return new Response(JSON.stringify({ users: [{ username: 'krys' }] }), { status: 200 })
       }
@@ -122,6 +125,7 @@ describe('email investigation', () => {
       'Spotify holehe-style hit should stream as registered',
     )
     assert.ok(intel.some((i) => i.type === 'account' && i.site === 'GitHub' && i.exists === true))
+    assert.ok(intel.some((i) => i.type === 'username' && i.value === 'krystin'))
     assert.ok(intel.some((i) => i.type === 'account' && i.site === 'Duolingo' && i.exists === true))
     assert.equal(intel.some((i) => i.site === 'Keybase' && i.exists === true), false)
 

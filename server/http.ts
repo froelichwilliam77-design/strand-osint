@@ -15,6 +15,8 @@ export interface ProbeHttpOptions {
   headers?: Record<string, string>
   body?: string
   source?: string
+  /** Default true. Set false for existence checks that key off 3xx Location. */
+  followRedirects?: boolean
 }
 
 export async function probeHttp(opts: ProbeHttpOptions): Promise<{ probe: ProbeResult; body: Buffer }> {
@@ -41,6 +43,14 @@ export async function probeHttp(opts: ProbeHttpOptions): Promise<{ probe: ProbeR
     })
     lastHeaders = response.headers
     if ([301, 302, 303, 307, 308].includes(response.status)) {
+      if (opts.followRedirects === false) {
+        let body = Buffer.alloc(0)
+        if (method !== 'HEAD') {
+          const buf = Buffer.from(await response.arrayBuffer())
+          body = buf.subarray(0, MAX_BODY)
+        }
+        return packProbe(opts.url, current, method, response.status, lastHeaders, body, redirectChain, opts.source)
+      }
       const location = response.headers.get('location')
       if (!location) {
         return packProbe(opts.url, current, method, response.status, lastHeaders, Buffer.alloc(0), redirectChain, opts.source)

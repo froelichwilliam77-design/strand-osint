@@ -118,12 +118,30 @@ export function peekSeedKind(raw: string): SeedKind {
 }
 
 export function isPrimaryIntel(item: IntelResult): boolean {
-  if (item.confidence === 'unverified') return false
-  if (item.exists === false) return false
+  if (item.confidence === 'unverified' || item.confidence === 'low') return false
+  if (item.exists === false || item.exists === null) return false
   if (item.exists === true) return true
   if (item.confidence === 'high' || item.confidence === 'medium') return true
   if (item.probed) return true
   return !item.confidence
+}
+
+/** Lower is better. Confirmed registrations first; weak/inconclusive last. */
+export function intelRank(item: IntelResult): number {
+  if (item.exists === true) return 0
+  if (item.site === 'Presence') return 1
+  if (item.confidence === 'high') return 2
+  if (item.confidence === 'medium') return 3
+  if (item.confidence === 'low' || item.exists === null) return 4
+  if (item.confidence === 'unverified') return 5
+  return 3
+}
+
+export function sortIntel(items: IntelResult[]): IntelResult[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => intelRank(a.item) - intelRank(b.item) || a.index - b.index)
+    .map((entry) => entry.item)
 }
 
 export interface LogEvent {

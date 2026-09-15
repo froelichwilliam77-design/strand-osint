@@ -4,6 +4,7 @@ import { Button } from '@/components/ui'
 import { exportCsv, exportJson } from '@/lib/export'
 import {
   isPrimaryIntel,
+  sortIntel,
   type FormResult,
   type IntelResult,
   type LogEvent,
@@ -329,27 +330,30 @@ function IntelList({ intel, running }: { intel: IntelResult[]; running?: boolean
     return (
       <Empty
         title={running ? 'Collecting signals…' : 'No intel yet'}
-        hint="Verified and probed hits land here first. Unverified guesses stay labeled and secondary."
+        hint="Confirmed registrations land here first. Inconclusive and unverified guesses stay hidden until you ask."
       />
     )
   }
-  const primary = intel.filter(isPrimaryIntel)
-  const unverified = intel.filter((i) => !isPrimaryIntel(i))
-  const shown = showUnverified ? intel : primary
+  const ranked = sortIntel(intel)
+  const primary = ranked.filter(isPrimaryIntel)
+  const weak = ranked.filter((i) => !isPrimaryIntel(i))
+  const registered = intel.filter((i) => i.exists === true).length
+  const shown = showUnverified ? ranked : primary
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
         <div className="text-xs text-muted">
-          {primary.length} verified / probed
-          {unverified.length ? ` · ${unverified.length} unverified` : ''}
+          {registered} registered
+          {primary.length !== registered ? ` · ${primary.length} verified` : ''}
+          {weak.length ? ` · ${weak.length} weak signals` : ''}
         </div>
-        {unverified.length > 0 ? (
+        {weak.length > 0 ? (
           <button
             type="button"
             className="min-h-10 rounded-lg px-3 text-xs text-sage-dim hover:bg-raised"
             onClick={() => setShowUnverified((v) => !v)}
           >
-            {showUnverified ? 'Hide unverified' : 'Show unverified'}
+            {showUnverified ? 'Hide weak signals' : 'Show unverified'}
           </button>
         ) : null}
       </div>
@@ -370,9 +374,9 @@ function IntelList({ intel, running }: { intel: IntelResult[]; running?: boolean
           </li>
         ))}
       </ul>
-      {!showUnverified && unverified.length > 0 ? (
+      {!showUnverified && weak.length > 0 ? (
         <p className="px-4 py-3 text-xs text-muted">
-          Unverified local-part variants are hidden. They are guesses, not account hits.
+          Weak signals (inconclusive checks and local-part guesses) are hidden. They are not confirmed account hits.
         </p>
       ) : null}
     </div>
@@ -383,19 +387,21 @@ function ConfidenceBadge({ item }: { item: IntelResult }) {
   const label =
     item.exists === true
       ? 'registered'
-      : item.confidence === 'unverified'
-        ? 'unverified'
-        : item.confidence === 'high'
-          ? 'verified'
-          : item.confidence === 'medium'
-            ? 'probed'
-            : item.confidence === 'low'
-              ? 'low'
-              : item.probed
+      : item.exists === false
+        ? 'not registered'
+        : item.exists === null || item.confidence === 'low'
+          ? 'inconclusive'
+          : item.confidence === 'unverified'
+            ? 'unverified'
+            : item.confidence === 'high'
+              ? 'verified'
+              : item.confidence === 'medium'
                 ? 'probed'
-                : 'harvested'
+                : item.probed
+                  ? 'probed'
+                  : 'harvested'
   const tone =
-    item.confidence === 'unverified'
+    item.confidence === 'unverified' || item.exists === null || item.confidence === 'low'
       ? 'text-warn border-warn/40'
       : item.exists === true || item.confidence === 'high'
         ? 'text-sage-dim border-sage-dim/40'
